@@ -268,6 +268,7 @@ mod tests {
                     use_connected_socket: true,
                     #[cfg(target_os = "linux")]
                     use_multi_queue: true,
+                    open_uapi_socket: false,
                     #[cfg(target_os = "linux")]
                     uapi_fd: -1,
                 },
@@ -560,6 +561,7 @@ mod tests {
                 use_connected_socket: false,
                 #[cfg(target_os = "linux")]
                 use_multi_queue: true,
+                open_uapi_socket: false,
                 #[cfg(target_os = "linux")]
                 uapi_fd: -1,
             },
@@ -718,6 +720,7 @@ mod tests {
                 use_connected_socket: false,
                 #[cfg(target_os = "linux")]
                 use_multi_queue: true,
+                open_uapi_socket: false,
                 #[cfg(target_os = "linux")]
                 uapi_fd: -1,
             },

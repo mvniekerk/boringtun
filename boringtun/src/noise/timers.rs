@@ -5,8 +5,18 @@ use super::errors::WireGuardError;
 use crate::noise::{TunnInner, TunnResult};
 use std::mem;
 use std::ops::{Index, IndexMut};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use std::time::Instant;
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[cfg_attr(target_os = "android", path = "./_instant_boottime_android.rs")]
+#[cfg_attr(target_os = "ios", path = "./_instant_boottime_ios.rs")]
+mod _instant_boottime;
+#[cfg(any(target_os = "android", target_os = "ios"))]
+use _instant_boottime::Instant;
+
 
 // Some constants, represent time in seconds
 // https://www.wireguard.com/papers/wireguard.pdf#page=14
@@ -283,8 +293,9 @@ impl TunnInner {
 
                     // Persistent KEEPALIVE
                     if persistent_keepalive > 0
-                        && (now - self.timers[TimePersistentKeepalive]
+                        && ((now - self.timers[TimePersistentKeepalive]
                             >= Duration::from_secs(persistent_keepalive as _))
+                            || self.time_since_last_handshake().is_none())
                     {
                         tracing::debug!("KEEPALIVE(PERSISTENT_KEEPALIVE)");
                         self.timer_tick(TimePersistentKeepalive);
@@ -330,5 +341,9 @@ impl TunnInner {
         } else {
             None
         }
+    }
+
+    pub fn set_persistent_keepalive(&mut self, keepalive: u16) {
+        self.timers.persistent_keepalive = keepalive as usize;
     }
 }

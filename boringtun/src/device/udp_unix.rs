@@ -5,6 +5,9 @@ use super::{errno, errno_str, Error};
 use libc::*;
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::os::unix::io::{AsRawFd, RawFd};
+use std::sync::Arc;
+
+use crate::device::MakeExternalBoringtun;
 
 /// Receives and sends UDP packets over the network
 #[derive(Debug)]
@@ -28,7 +31,7 @@ impl UDPSocket {
             bind(
                 self.fd,
                 &addr as *const sockaddr_in as *const sockaddr,
-                std::mem::size_of::<sockaddr_in>() as u32,
+                std::mem::size_of::<sockaddr_in>() as socklen_t,
             )
         } {
             -1 => Err(Error::Bind(errno_str())),
@@ -45,7 +48,7 @@ impl UDPSocket {
             bind(
                 self.fd,
                 &addr as *const sockaddr_in6 as *const sockaddr,
-                std::mem::size_of::<sockaddr_in6>() as u32,
+                std::mem::size_of::<sockaddr_in6>() as socklen_t,
             )
         } {
             -1 => Err(Error::Bind(errno_str())),
@@ -70,7 +73,7 @@ impl UDPSocket {
             connect(
                 self.fd,
                 &addr as *const sockaddr_in as *const sockaddr,
-                std::mem::size_of::<sockaddr_in>() as u32,
+                std::mem::size_of::<sockaddr_in>() as socklen_t,
             )
         } {
             -1 => Err(Error::Connect(errno_str())),
@@ -89,7 +92,7 @@ impl UDPSocket {
             connect(
                 self.fd,
                 &addr as *const sockaddr_in6 as *const sockaddr,
-                std::mem::size_of::<sockaddr_in6>() as u32,
+                std::mem::size_of::<sockaddr_in6>() as socklen_t,
             )
         } {
             -1 => Err(Error::Connect(errno_str())),
@@ -235,19 +238,27 @@ impl AsRawFd for UDPSocket {
 
 impl UDPSocket {
     /// Create a new IPv4 UDP socket
-    pub fn new() -> Result<UDPSocket, Error> {
-        match unsafe { socket(AF_INET, SOCK_DGRAM, 0) } {
-            -1 => Err(Error::Socket(errno_str())),
-            fd => Ok(UDPSocket { fd, version: 4 }),
-        }
+    pub fn new(protect: Arc<dyn MakeExternalBoringtun>) -> Result<UDPSocket, Error> {
+        let socket = match unsafe { socket(AF_INET, SOCK_DGRAM, 0) } {
+            -1 => return Err(Error::Socket(errno_str())),
+            fd => UDPSocket { fd, version: 4 },
+        };
+
+        protect.make_external(socket.as_raw_fd());
+
+        Ok(socket)
     }
 
     /// Create a new IPv6 UDP socket
-    pub fn new6() -> Result<UDPSocket, Error> {
-        match unsafe { socket(AF_INET6, SOCK_DGRAM, 0) } {
-            -1 => Err(Error::Socket(errno_str())),
-            fd => Ok(UDPSocket { fd, version: 6 }),
-        }
+    pub fn new6(protect: Arc<dyn MakeExternalBoringtun>) -> Result<UDPSocket, Error> {
+        let socket = match unsafe { socket(AF_INET6, SOCK_DGRAM, 0) } {
+            -1 => return Err(Error::Socket(errno_str())),
+            fd => UDPSocket { fd, version: 6 },
+        };
+
+        protect.make_external(socket.as_raw_fd());
+
+        Ok(socket)
     }
 
     /// Bind the socket to a local port
@@ -286,12 +297,12 @@ impl UDPSocket {
             setsockopt(
                 self.fd,
                 SOL_SOCKET,
-                #[cfg(target_os = "linux")]
+                #[cfg(any(target_os = "linux", target_os = "android"))]
                 SO_REUSEADDR, // On Linux SO_REUSEPORT won't prefer a connected IPv6 socket
-                #[cfg(not(target_os = "linux"))]
+                #[cfg(not(any(target_os = "linux", target_os = "android")))]
                 SO_REUSEPORT,
                 &1u32 as *const u32 as *const c_void,
-                std::mem::size_of::<u32>() as u32,
+                std::mem::size_of::<u32>() as socklen_t,
             )
         } {
             -1 => Err(Error::SetSockOpt(errno_str())),
@@ -317,7 +328,7 @@ impl UDPSocket {
         }
     }
 
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
     pub fn set_fwmark(&self, _: u32) -> Result<(), Error> {
         Ok(())
     }
@@ -355,17 +366,17 @@ impl UDPSocket {
         }
     }
 
+    /// Sends a message on a connected UDP socket. Returns number of bytes successfully sent.
+    pub fn write(&self, src: &[u8]) -> usize {
+        UDPSocket::write_fd(self.fd, src)
+    }
+
     /// Receives a message on a connected UDP socket and returns its contents
     pub fn read<'a>(&self, dst: &'a mut [u8]) -> Result<&'a mut [u8], Error> {
         match unsafe { recv(self.fd, &mut dst[0] as *mut u8 as _, dst.len(), 0) } {
             -1 => Err(Error::UDPRead(errno())),
             n => Ok(&mut dst[..n as usize]),
         }
-    }
-
-    /// Sends a message on a connected UDP socket. Returns number of bytes successfully sent.
-    pub fn write(&self, src: &[u8]) -> usize {
-        UDPSocket::write_fd(self.fd, src)
     }
 
     /// Calls shutdown on a connected socket. This will trigger an EOF in the event queue.

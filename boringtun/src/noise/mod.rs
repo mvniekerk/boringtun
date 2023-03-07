@@ -11,6 +11,7 @@ mod timers;
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::Handshake;
 use crate::noise::rate_limiter::RateLimiter;
+use crate::noise::session::message_data_len;
 use crate::noise::timers::{TimerName, Timers};
 
 use parking_lot::RwLock;
@@ -19,6 +20,7 @@ use std::convert::{TryFrom, TryInto};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use std::time::Duration;
+use slog::Logger;
 
 /// The default value to use for rate limiting, when no other rate limiter is defined
 const PEER_HANDSHAKE_RATE_LIMIT: u64 = 10;
@@ -75,6 +77,7 @@ struct TunnInner {
     tx_bytes: usize,
     rx_bytes: usize,
     rate_limiter: Arc<RateLimiter>,
+    pub logger: Logger,
 }
 
 type MessageType = u32;
@@ -241,6 +244,10 @@ impl Tunn {
         self.inner.read().persistent_keepalive()
     }
 
+    pub fn set_persistent_keepalive(&self, keepalive: u16) {
+        self.inner.write().set_persistent_keepalive(keepalive);
+    }
+    
     pub fn time_since_last_handshake(&self) -> Option<Duration> {
         self.inner.read().time_since_last_handshake()
     }
@@ -321,6 +328,7 @@ impl TunnInner {
             rate_limiter: rate_limiter.unwrap_or_else(|| {
                 Arc::new(RateLimiter::new(&static_public, PEER_HANDSHAKE_RATE_LIMIT))
             }),
+            logger: slog::Logger::root(slog::Discard, slog::o!()),
         };
 
         Ok(tunn)
@@ -358,8 +366,13 @@ impl TunnInner {
             return TunnResult::WriteToNetwork(packet);
         }
 
-        // If there is no session, queue the packet for future retry
-        self.queue_packet(src);
+        if !src.is_empty() {
+            // If there is no session, queue the packet for future retry,
+            // except if it's keepalive packet, new keepalive packets will be sent when session is created.
+            // This prevents double keepalive packets on initiation
+            self.queue_packet(src);
+        }
+
         // Initiate a new handshake if none is in progress
         self.format_handshake_initiation(dst, false)
     }
@@ -443,7 +456,6 @@ impl TunnInner {
         );
 
         let session = self.handshake.receive_handshake_response(p)?;
-
         let keepalive_packet = session.format_packet_data(&[], dst);
         // Store new session in ring buffer
         let l_idx = session.local_index();
@@ -455,6 +467,7 @@ impl TunnInner {
         self.set_current_session(l_idx);
 
         tracing::debug!("Sending keepalive");
+        self.tx_bytes += keepalive_packet.len();
 
         Ok(TunnResult::WriteToNetwork(keepalive_packet)) // Send a keepalive as a response
     }
@@ -552,7 +565,10 @@ impl TunnInner {
     /// Returns the truncated packet and the source IP as TunnResult
     fn validate_decapsulated_packet<'a>(&mut self, packet: &'a mut [u8]) -> TunnResult<'a> {
         let (computed_len, src_ip_address) = match packet.len() {
-            0 => return TunnResult::Done, // This is keepalive, and not an error
+            0 => {
+                self.rx_bytes += message_data_len(0);
+                return TunnResult::Done; // This is keepalive, and not an error
+            }
             _ if packet[0] >> 4 == 4 && packet.len() >= IPV4_MIN_HEADER_SIZE => {
                 let len_bytes: [u8; IP_LEN_SZ] = packet[IPV4_LEN_OFF..IPV4_LEN_OFF + IP_LEN_SZ]
                     .try_into()
@@ -587,7 +603,7 @@ impl TunnInner {
         }
 
         self.timer_tick(TimerName::TimeLastDataPacketReceived);
-        self.rx_bytes += computed_len;
+        self.rx_bytes += message_data_len(computed_len);
 
         match src_ip_address {
             IpAddr::V4(addr) => TunnResult::WriteToTunnelV4(&mut packet[..computed_len], addr),

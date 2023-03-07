@@ -9,7 +9,7 @@ use crate::serialization::KeyBytes;
 use hex::encode as encode_hex;
 use libc::*;
 use std::fs::{create_dir, remove_file};
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::atomic::Ordering;
@@ -58,18 +58,7 @@ impl Device {
 
                 let mut reader = BufReader::new(&api_conn);
                 let mut writer = BufWriter::new(&api_conn);
-                let mut cmd = String::new();
-                if reader.read_line(&mut cmd).is_ok() {
-                    cmd.pop(); // pop the new line character
-                    let status = match cmd.as_ref() {
-                        // Only two commands are legal according to the protocol, get=1 and set=1.
-                        "get=1" => api_get(&mut writer, d),
-                        "set=1" => api_set(&mut reader, d),
-                        _ => EIO,
-                    };
-                    // The protocol requires to return an error code as the response, or zero on success
-                    writeln!(writer, "errno={}\n", status).ok();
-                }
+                api_exec(d, &mut reader, &mut writer);
                 Action::Continue // Indicates the worker thread should continue as normal
             }),
         )?;
@@ -152,8 +141,27 @@ impl Device {
     }
 }
 
+pub fn api_exec<R: Read, W: Write>(
+    d: &mut LockReadGuard<Device>,
+    reader: &mut BufReader<R>,
+    writer: &mut BufWriter<W>,
+) {
+    let mut cmd = String::new();
+    if reader.read_line(&mut cmd).is_ok() {
+        cmd.pop(); // pop the new line character
+        let status = match cmd.as_ref() {
+            // Only two commands are legal according to the protocol, get=1 and set=1.
+            "get=1" => api_get(writer, d),
+            "set=1" => api_set(reader, d),
+            _ => EIO,
+        };
+        // The protocol requires to return an error code as the response, or zero on success
+        writeln!(writer, "errno={}\n", status).ok();
+    }
+}
+
 #[allow(unused_must_use)]
-fn api_get(writer: &mut BufWriter<&UnixStream>, d: &Device) -> i32 {
+fn api_get<W: Write>(writer: &mut BufWriter<W>, d: &Device) -> i32 {
     // get command requires an empty line, but there is no reason to be religious about it
     if let Some(ref k) = d.key_pair {
         writeln!(writer, "own_public_key={}", encode_hex(k.1.as_bytes()));
@@ -182,8 +190,8 @@ fn api_get(writer: &mut BufWriter<&UnixStream>, d: &Device) -> i32 {
             writeln!(writer, "endpoint={}", addr);
         }
 
-        for (ip, cidr) in p.allowed_ips() {
-            writeln!(writer, "allowed_ip={}/{}", ip, cidr);
+        for AllowedIP { addr, cidr } in p.allowed_ips() {
+            writeln!(writer, "allowed_ip={}/{}", addr, cidr);
         }
 
         if let Some(time) = p.time_since_last_handshake() {
@@ -199,7 +207,10 @@ fn api_get(writer: &mut BufWriter<&UnixStream>, d: &Device) -> i32 {
     0
 }
 
-fn api_set(reader: &mut BufReader<&UnixStream>, d: &mut LockReadGuard<Device>) -> i32 {
+fn api_set<R: Read>(
+    reader: &mut BufReader<R>,
+    d: &mut LockReadGuard<Device>,
+) -> i32 {
     d.try_writeable(
         |device| device.trigger_yield(),
         |device| {
@@ -269,13 +280,14 @@ fn api_set(reader: &mut BufReader<&UnixStream>, d: &mut LockReadGuard<Device>) -
     .unwrap_or(EIO)
 }
 
-fn api_set_peer(
-    reader: &mut BufReader<&UnixStream>,
+fn api_set_peer<R: Read>(
+    reader: &mut BufReader<R>,
     d: &mut Device,
     pub_key: x25519_dalek::PublicKey,
 ) -> i32 {
     let mut cmd = String::new();
 
+    let mut update_only = false;
     let mut remove = false;
     let mut replace_ips = false;
     let mut endpoint = None;
@@ -286,8 +298,9 @@ fn api_set_peer(
     while reader.read_line(&mut cmd).is_ok() {
         cmd.pop(); // remove newline if any
         if cmd.is_empty() {
-            d.update_peer(
+            let res = d.update_peer(
                 public_key,
+                update_only,
                 remove,
                 replace_ips,
                 endpoint,
@@ -296,7 +309,7 @@ fn api_set_peer(
                 preshared_key,
             );
             allowed_ips.clear(); //clear the vector content after update
-            return 0; // Done
+            return res.and(Ok(0)).unwrap_or(EINVAL);
         }
         {
             let parsed_cmd: Vec<&str> = cmd.splitn(2, '=').collect();
@@ -305,6 +318,10 @@ fn api_set_peer(
             }
             let (key, val) = (parsed_cmd[0], parsed_cmd[1]);
             match key {
+                "update_only" => match val.parse::<bool>().map(|val| update_only = val) {
+                    Ok(_) => {}
+                    Err(_) => return EINVAL,
+                },
                 "remove" => match val.parse::<bool>() {
                     Ok(true) => remove = true,
                     Ok(false) => remove = false,
@@ -333,8 +350,9 @@ fn api_set_peer(
                 },
                 "public_key" => {
                     // Indicates a new peer section. Commit changes for current peer, and continue to next peer
-                    d.update_peer(
+                    let res = d.update_peer(
                         public_key,
+                        update_only,
                         remove,
                         replace_ips,
                         endpoint,
@@ -342,6 +360,9 @@ fn api_set_peer(
                         keepalive,
                         preshared_key,
                     );
+                    if res.is_err() {
+                        return EINVAL;
+                    }
                     allowed_ips.clear(); //clear the vector content after update
                     match val.parse::<KeyBytes>() {
                         Ok(key_bytes) => public_key = key_bytes.0.into(),

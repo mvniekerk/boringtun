@@ -2,13 +2,12 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use parking_lot::RwLock;
-
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use crate::device::{AllowedIps, Error};
+use crate::device::{AllowedIps, Error, MakeExternalBoringtun};
 use crate::noise::{Tunn, TunnResult};
 
 use crate::device::udp::UDPSocket;
@@ -23,8 +22,9 @@ pub struct Peer {
     pub(crate) tunnel: Box<Tunn>, // The associated tunnel struct
     index: u32,                   // The index the tunnel uses
     endpoint: RwLock<Endpoint>,
-    allowed_ips: AllowedIps<()>,
-    preshared_key: Option<[u8; 32]>,
+    allowed_ips: RwLock<AllowedIps<()>>,
+    preshared_key: RwLock<Option<[u8; 32]>>,
+    protect: Arc<dyn MakeExternalBoringtun>,
 }
 
 #[derive(Debug)]
@@ -37,7 +37,7 @@ impl FromStr for AllowedIP {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let ip: Vec<&str> = s.split('/').collect();
+            let ip: Vec<&str> = s.split('/').collect();
         if ip.len() != 2 {
             return Err("Invalid IP format".to_owned());
         }
@@ -58,6 +58,7 @@ impl Peer {
         endpoint: Option<SocketAddr>,
         allowed_ips: &[AllowedIP],
         preshared_key: Option<[u8; 32]>,
+        protect: Arc<dyn MakeExternalBoringtun>,
     ) -> Peer {
         Peer {
             tunnel,
@@ -66,8 +67,9 @@ impl Peer {
                 addr: endpoint,
                 conn: None,
             }),
-            allowed_ips: allowed_ips.iter().map(|ip| (ip, ())).collect(),
-            preshared_key,
+            allowed_ips: RwLock::new(allowed_ips.iter().map(|ip| (ip, ())).collect()),
+            preshared_key: RwLock::new(preshared_key),
+            protect,
         }
     }
 
@@ -112,23 +114,23 @@ impl Peer {
             return Err(Error::Connect("Connected".to_owned()));
         }
 
-        let udp_conn = Arc::new(match endpoint.addr {
-            Some(addr @ SocketAddr::V4(_)) => UDPSocket::new()?
-                .set_non_blocking()?
-                .set_reuse()?
-                .bind(port)?
-                .connect(&addr)?,
-            Some(addr @ SocketAddr::V6(_)) => UDPSocket::new6()?
-                .set_non_blocking()?
-                .set_reuse()?
-                .bind(port)?
-                .connect(&addr)?,
+        let socket = match endpoint.addr {
+            Some(_addr @ SocketAddr::V4(_)) => UDPSocket::new(self.protect.clone())?,
+            Some(_addr @ SocketAddr::V6(_)) => UDPSocket::new6(self.protect.clone())?,
             None => panic!("Attempt to connect to undefined endpoint"),
-        });
+        };
 
         if let Some(fwmark) = fwmark {
-            udp_conn.set_fwmark(fwmark)?;
+            socket.set_fwmark(fwmark)?;
         }
+
+        let udp_conn = Arc::new(
+            socket
+                .set_non_blocking()?
+                .set_reuse()?
+                .bind(port)?
+                .connect(&endpoint.addr.unwrap())?,
+        );
 
         tracing::info!(
             message="Connected endpoint",
@@ -142,11 +144,30 @@ impl Peer {
     }
 
     pub fn is_allowed_ip<I: Into<IpAddr>>(&self, addr: I) -> bool {
-        self.allowed_ips.find(addr.into()).is_some()
+        self.allowed_ips.read().find(addr.into()).is_some()
     }
 
-    pub fn allowed_ips(&self) -> impl Iterator<Item = (IpAddr, u8)> + '_ {
-        self.allowed_ips.iter().map(|(_, ip, cidr)| (ip, cidr))
+    pub fn allowed_ips(&self) -> Vec<AllowedIP> {
+        self.allowed_ips
+            .read()
+            .iter()
+            .map(|(_, ip, cidr)| AllowedIP {
+                addr: ip,
+                cidr: cidr,
+            })
+            .collect()
+    }
+
+    pub fn add_allowed_ips(&self, new_allowed_ips: &[AllowedIP]) {
+        let mut allowed_ips = self.allowed_ips.write();
+
+        for AllowedIP { addr, cidr } in new_allowed_ips {
+            allowed_ips.insert(*addr, *cidr as u32, ());
+        }
+    }
+
+    pub fn set_allowed_ips(&self, allowed_ips: &[AllowedIP]) {
+        *self.allowed_ips.write() = allowed_ips.iter().map(|ip| (ip, ())).collect();
     }
 
     pub fn time_since_last_handshake(&self) -> Option<std::time::Duration> {
@@ -157,8 +178,18 @@ impl Peer {
         self.tunnel.persistent_keepalive()
     }
 
-    pub fn preshared_key(&self) -> Option<&[u8; 32]> {
-        self.preshared_key.as_ref()
+    pub fn set_persistent_keepalive(&self, keepalive: u16) {
+        self.tunnel.set_persistent_keepalive(keepalive);
+    }
+
+    pub fn preshared_key(&self) -> Option<[u8; 32]> {
+        *self.preshared_key.read()
+    }
+
+    pub fn set_preshared_key(&self, key: [u8; 32]) {
+        let mut preshared_key = self.preshared_key.write();
+
+        let _ = preshared_key.replace(key);
     }
 
     pub fn index(&self) -> u32 {
