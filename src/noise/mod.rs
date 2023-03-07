@@ -70,6 +70,7 @@ pub struct Tunn {
 
     rate_limiter: Arc<RateLimiter>,
 
+    pub peer_static_public: [u8; 32],
     pub logger: Logger,
 }
 
@@ -136,6 +137,8 @@ impl Tunn {
         let static_public = Arc::new(static_private.public_key());
 
         let tunn = Tunn {
+            peer_static_public: peer_static_public.internal,
+
             handshake: Mutex::new(
                 Handshake::new(
                     static_private,
