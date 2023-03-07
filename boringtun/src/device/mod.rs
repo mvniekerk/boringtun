@@ -103,9 +103,9 @@ enum Action {
 // Event handler function
 type Handler = Box<dyn Fn(&mut LockReadGuard<Device>, &mut ThreadData) -> Action + Send + Sync>;
 
-pub trait MakeExternalBoringtun: Send + Sync {                                                                                                                                                     
-         fn make_external(&self, socket: RawFd);                                                                                                                                                        
-     } 
+pub trait MakeExternalBoringtun: Send + Sync {
+    fn make_external(&self, socket: RawFd);
+}
 
 pub struct DeviceHandle {
     device: Arc<Lock<Device>>, // The interface this handle owns
@@ -120,8 +120,10 @@ pub struct DeviceConfig {
     pub use_multi_queue: bool,
     pub open_uapi_socket: bool,
     pub protect: Arc<dyn MakeExternalBoringtun>,
-    pub firewall_process_inbound_callback: Option<Arc<dyn Fn(&[u8]) -> bool + Send + Sync>>,
-    pub firewall_process_outbound_callback: Option<Arc<dyn Fn(&[u8]) -> bool + Send + Sync>>,
+    pub firewall_process_inbound_callback:
+        Option<Arc<dyn Fn(&x25519_dalek::PublicKey, &[u8]) -> bool + Send + Sync>>,
+    pub firewall_process_outbound_callback:
+        Option<Arc<dyn Fn(&x25519_dalek::PublicKey, &[u8]) -> bool + Send + Sync>>,
     #[cfg(target_os = "linux")]
     pub uapi_fd: i32,
 }
@@ -744,7 +746,7 @@ impl Device {
                         }
                         TunnResult::WriteToTunnelV4(packet, addr) => {
                             if let Some(callback) = &d.config.firewall_process_inbound_callback {
-                                if !callback(packet) {
+                                if !callback(&peer.tunnel.peer_static_public(), packet) {
                                     continue;
                                 }
                             }
@@ -760,7 +762,7 @@ impl Device {
                         }
                         TunnResult::WriteToTunnelV6(packet, addr) => {
                             if let Some(callback) = &d.config.firewall_process_inbound_callback {
-                                if !callback(packet) {
+                                if !callback(&peer.tunnel.peer_static_public(), packet) {
                                     continue;
                                 }
                             }
@@ -842,7 +844,7 @@ impl Device {
                         }
                         TunnResult::WriteToTunnelV4(packet, addr) => {
                             if let Some(callback) = &d.config.firewall_process_inbound_callback {
-                                if !callback(packet) {
+                                if !callback(&peer.tunnel.peer_static_public(), packet) {
                                     continue;
                                 }
                             }
@@ -858,7 +860,7 @@ impl Device {
                         }
                         TunnResult::WriteToTunnelV6(packet, addr) => {
                             if let Some(callback) = &d.config.firewall_process_inbound_callback {
-                                if !callback(packet) {
+                                if !callback(&peer.tunnel.peer_static_public(), packet) {
                                     continue;
                                 }
                             }
@@ -942,7 +944,7 @@ impl Device {
                     };
 
                     if let Some(callback) = &d.config.firewall_process_outbound_callback {
-                        if !callback(src) {
+                        if !callback(&peer.tunnel.peer_static_public(), src) {
                             continue;
                         }
                     }

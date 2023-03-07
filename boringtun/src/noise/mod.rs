@@ -77,6 +77,8 @@ struct TunnInner {
     tx_bytes: usize,
     rx_bytes: usize,
     rate_limiter: Arc<RateLimiter>,
+
+    pub peer_static_public: x25519_dalek::PublicKey,
     pub logger: Logger,
 }
 
@@ -198,6 +200,10 @@ impl Tunn {
         self.inner.read().stats()
     }
 
+    pub fn peer_static_public(&self) -> x25519_dalek::PublicKey {
+        self.inner.read().peer_static_public
+    }
+
     pub fn update_timers<'a>(&self, dst: &'a mut [u8]) -> TunnResult<'a> {
         self.inner.write().update_timers(dst)
     }
@@ -309,6 +315,8 @@ impl TunnInner {
         let static_public = x25519_dalek::PublicKey::from(&static_private);
 
         let tunn = TunnInner {
+            peer_static_public: peer_static_public,
+
             handshake: Handshake::new(
                 static_private,
                 static_public,
@@ -334,6 +342,7 @@ impl TunnInner {
         Ok(tunn)
     }
 
+    /// Update the private key and clear existing sessions
     fn set_static_private(
         &mut self,
         static_private: x25519_dalek::StaticSecret,
