@@ -173,6 +173,10 @@ impl Tun for TunSocket {
         Ok(TunSocket { fd })
     }
 
+    fn new_from_fd(fd: RawFd) -> Result<TunSocket, Error> {
+        Ok(TunSocket { fd })
+    }
+
     fn set_non_blocking(self) -> Result<TunSocket, Error> {
         match unsafe { fcntl(self.fd, F_GETFL) } {
             -1 => Err(Error::FCntl(errno_str())),

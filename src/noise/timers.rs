@@ -7,7 +7,17 @@ use crate::noise::{Tunn, TunnResult};
 use slog::debug;
 use std::ops::Index;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use std::time::Instant;
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[cfg_attr(target_os = "android", path = "./_instant_boottime_android.rs")]
+#[cfg_attr(target_os = "ios", path = "./_instant_boottime_ios.rs")]
+mod _instant_boottime;
+#[cfg(any(target_os = "android", target_os = "ios"))]
+use _instant_boottime::Instant;
 
 /*
 static MAX_TIMER_HANDSHAKES: u32 = 90 / 5;
@@ -285,8 +295,9 @@ impl Tunn {
 
                     // Persistent KEEPALIVE
                     if persistent_keepalive > 0
-                        && (now - timers[TimePersistentKeepalive].time()
+                        && ((now - timers[TimePersistentKeepalive].time()
                             >= Duration::from_secs(persistent_keepalive as _))
+                            || self.time_since_last_handshake().is_none())
                     {
                         debug!(self.logger, "KEEPALIVE(PERSISTENT_KEEPALIVE)");
                         self.timer_tick(TimePersistentKeepalive);
@@ -331,5 +342,11 @@ impl Tunn {
         } else {
             None
         }
+    }
+
+    pub fn set_persistent_keepalive(&self, keepalive: u16) {
+        self.timers
+            .persistent_keepalive
+            .store(keepalive as usize, Ordering::Release)
     }
 }

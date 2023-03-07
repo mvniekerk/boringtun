@@ -3,6 +3,7 @@
 
 use crate::device::*;
 use parking_lot::RwLock;
+use slog::info;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::str::FromStr;
@@ -21,8 +22,9 @@ pub struct Peer<S: Sock> {
     pub(crate) tunnel: Box<Tunn>, // The associated tunnel struct
     index: u32,                   // The index the tunnel uses
     endpoint: RwLock<Endpoint<S>>,
-    allowed_ips: AllowedIps<()>,
-    preshared_key: Option<[u8; 32]>,
+    allowed_ips: RwLock<AllowedIps<()>>,
+    preshared_key: RwLock<Option<[u8; 32]>>,
+    protect: Arc<dyn MakeExternalBoringtun>,
 }
 
 #[derive(Debug)]
@@ -56,6 +58,7 @@ impl<S: Sock> Peer<S> {
         endpoint: Option<SocketAddr>,
         allowed_ips: &[AllowedIP],
         preshared_key: Option<[u8; 32]>,
+        protect: Arc<dyn MakeExternalBoringtun>,
     ) -> Peer<S> {
         Peer {
             tunnel,
@@ -64,8 +67,9 @@ impl<S: Sock> Peer<S> {
                 addr: endpoint,
                 conn: None,
             }),
-            allowed_ips: allowed_ips.iter().map(|ip| (ip, ())).collect(),
-            preshared_key,
+            allowed_ips: RwLock::new(allowed_ips.iter().map(|ip| (ip, ())).collect()),
+            preshared_key: RwLock::new(preshared_key),
+            protect,
         }
     }
 
@@ -106,23 +110,23 @@ impl<S: Sock> Peer<S> {
             return Err(Error::Connect("Connected".to_owned()));
         }
 
-        let udp_conn = Arc::new(match endpoint.addr {
-            Some(addr @ SocketAddr::V4(_)) => S::new()?
-                .set_non_blocking()?
-                .set_reuse()?
-                .bind(port)?
-                .connect(&addr)?,
-            Some(addr @ SocketAddr::V6(_)) => S::new6()?
-                .set_non_blocking()?
-                .set_reuse()?
-                .bind(port)?
-                .connect(&addr)?,
+        let socket = match endpoint.addr {
+            Some(_addr @ SocketAddr::V4(_)) => S::new(self.protect.clone())?,
+            Some(_addr @ SocketAddr::V6(_)) => S::new6(self.protect.clone())?,
             None => panic!("Attempt to connect to undefined endpoint"),
-        });
+        };
 
         if let Some(fwmark) = fwmark {
-            udp_conn.set_fwmark(fwmark)?;
+            socket.set_fwmark(fwmark)?;
         }
+
+        let udp_conn = Arc::new(
+            socket
+                .set_non_blocking()?
+                .set_reuse()?
+                .bind(port)?
+                .connect(&endpoint.addr.unwrap())?,
+        );
 
         info!(
             self.tunnel.logger,
@@ -137,11 +141,30 @@ impl<S: Sock> Peer<S> {
     }
 
     pub fn is_allowed_ip<I: Into<IpAddr>>(&self, addr: I) -> bool {
-        self.allowed_ips.find(addr.into()).is_some()
+        self.allowed_ips.read().find(addr.into()).is_some()
     }
 
-    pub fn allowed_ips(&self) -> impl Iterator<Item = (IpAddr, u8)> + '_ {
-        self.allowed_ips.iter().map(|(_, ip, cidr)| (ip, cidr))
+    pub fn allowed_ips(&self) -> Vec<AllowedIP> {
+        self.allowed_ips
+            .read()
+            .iter()
+            .map(|(_, ip, cidr)| AllowedIP {
+                addr: ip,
+                cidr: cidr,
+            })
+            .collect()
+    }
+
+    pub fn add_allowed_ips(&self, new_allowed_ips: &[AllowedIP]) {
+        let mut allowed_ips = self.allowed_ips.write();
+
+        for AllowedIP { addr, cidr } in new_allowed_ips {
+            allowed_ips.insert(*addr, *cidr as u32, ());
+        }
+    }
+
+    pub fn set_allowed_ips(&self, allowed_ips: &[AllowedIP]) {
+        *self.allowed_ips.write() = allowed_ips.iter().map(|ip| (ip, ())).collect();
     }
 
     pub fn time_since_last_handshake(&self) -> Option<std::time::Duration> {
@@ -152,8 +175,18 @@ impl<S: Sock> Peer<S> {
         self.tunnel.persistent_keepalive()
     }
 
-    pub fn preshared_key(&self) -> Option<&[u8; 32]> {
-        self.preshared_key.as_ref()
+    pub fn set_persistent_keepalive(&self, keepalive: u16) {
+        self.tunnel.set_persistent_keepalive(keepalive);
+    }
+
+    pub fn preshared_key(&self) -> Option<[u8; 32]> {
+        *self.preshared_key.read()
+    }
+
+    pub fn set_preshared_key(&self, key: [u8; 32]) {
+        let mut preshared_key = self.preshared_key.write();
+
+        let _ = preshared_key.replace(key);
     }
 
     pub fn index(&self) -> u32 {

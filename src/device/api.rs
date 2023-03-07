@@ -3,14 +3,15 @@
 
 use super::dev_lock::LockReadGuard;
 use super::drop_privileges::*;
-use super::{make_array, AllowedIP, Device, Error, SocketAddr, X25519PublicKey, X25519SecretKey};
+use super::make_array;
+use super::{AllowedIP, Device, Error, SocketAddr, X25519PublicKey, X25519SecretKey};
 use crate::device::{Action, Sock, Tun};
 use hex::encode as encode_hex;
 use libc::*;
 use std::fs::{create_dir, remove_file};
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::os::unix::io::AsRawFd;
-use std::os::unix::net::{UnixListener, UnixStream};
+use std::os::unix::net::UnixListener;
 use std::sync::atomic::Ordering;
 
 const SOCK_DIR: &str = "/var/run/wireguard/";
@@ -57,18 +58,7 @@ impl<T: Tun, S: Sock> Device<T, S> {
 
                 let mut reader = BufReader::new(&api_conn);
                 let mut writer = BufWriter::new(&api_conn);
-                let mut cmd = String::new();
-                if reader.read_line(&mut cmd).is_ok() {
-                    cmd.pop(); // pop the new line character
-                    let status = match cmd.as_ref() {
-                        // Only two commands are legal according to the protocol, get=1 and set=1.
-                        "get=1" => api_get(&mut writer, d),
-                        "set=1" => api_set(&mut reader, d),
-                        _ => EIO,
-                    };
-                    // The protocol requires to return an error code as the response, or zero on success
-                    writeln!(writer, "errno={}\n", status).ok();
-                }
+                api_exec(d, &mut reader, &mut writer);
                 Action::Continue // Indicates the worker thread should continue as normal
             }),
         )?;
@@ -117,8 +107,27 @@ impl<T: Tun, S: Sock> Device<T, S> {
     }
 }
 
+pub fn api_exec<T: Tun, S: Sock, R: Read, W: Write>(
+    d: &mut LockReadGuard<Device<T, S>>,
+    reader: &mut BufReader<R>,
+    writer: &mut BufWriter<W>,
+) {
+    let mut cmd = String::new();
+    if reader.read_line(&mut cmd).is_ok() {
+        cmd.pop(); // pop the new line character
+        let status = match cmd.as_ref() {
+            // Only two commands are legal according to the protocol, get=1 and set=1.
+            "get=1" => api_get(writer, d),
+            "set=1" => api_set(reader, d),
+            _ => EIO,
+        };
+        // The protocol requires to return an error code as the response, or zero on success
+        writeln!(writer, "errno={}\n", status).ok();
+    }
+}
+
 #[allow(unused_must_use)]
-fn api_get<T: Tun, S: Sock>(writer: &mut BufWriter<&UnixStream>, d: &Device<T, S>) -> i32 {
+fn api_get<T: Tun, S: Sock, W: Write>(writer: &mut BufWriter<W>, d: &Device<T, S>) -> i32 {
     // get command requires an empty line, but there is no reason to be religious about it
     if let Some(ref k) = d.key_pair {
         writeln!(writer, "private_key={}", encode_hex(k.0.as_bytes()));
@@ -147,8 +156,8 @@ fn api_get<T: Tun, S: Sock>(writer: &mut BufWriter<&UnixStream>, d: &Device<T, S
             writeln!(writer, "endpoint={}", addr);
         }
 
-        for (ip, cidr) in p.allowed_ips() {
-            writeln!(writer, "allowed_ip={}/{}", ip, cidr);
+        for AllowedIP { addr, cidr } in p.allowed_ips() {
+            writeln!(writer, "allowed_ip={}/{}", addr, cidr);
         }
 
         if let Some(time) = p.time_since_last_handshake() {
@@ -164,8 +173,8 @@ fn api_get<T: Tun, S: Sock>(writer: &mut BufWriter<&UnixStream>, d: &Device<T, S
     0
 }
 
-fn api_set<T: Tun, S: Sock>(
-    reader: &mut BufReader<&UnixStream>,
+fn api_set<T: Tun, S: Sock, R: Read>(
+    reader: &mut BufReader<R>,
     d: &mut LockReadGuard<Device<T, S>>,
 ) -> i32 {
     d.try_writeable(
@@ -229,13 +238,14 @@ fn api_set<T: Tun, S: Sock>(
     .unwrap_or(EIO)
 }
 
-fn api_set_peer<T: Tun, S: Sock>(
-    reader: &mut BufReader<&UnixStream>,
+fn api_set_peer<T: Tun, S: Sock, R: Read>(
+    reader: &mut BufReader<R>,
     d: &mut Device<T, S>,
     pub_key: X25519PublicKey,
 ) -> i32 {
     let mut cmd = String::new();
 
+    let mut update_only = false;
     let mut remove = false;
     let mut replace_ips = false;
     let mut endpoint = None;
@@ -246,8 +256,9 @@ fn api_set_peer<T: Tun, S: Sock>(
     while reader.read_line(&mut cmd).is_ok() {
         cmd.pop(); // remove newline if any
         if cmd.is_empty() {
-            d.update_peer(
+            let res = d.update_peer(
                 pub_key,
+                update_only,
                 remove,
                 replace_ips,
                 endpoint,
@@ -255,7 +266,7 @@ fn api_set_peer<T: Tun, S: Sock>(
                 keepalive,
                 preshared_key,
             );
-            return 0; // Done
+            return res.and(Ok(0)).unwrap_or(EINVAL);
         }
         {
             let parsed_cmd: Vec<&str> = cmd.splitn(2, '=').collect();
@@ -266,6 +277,10 @@ fn api_set_peer<T: Tun, S: Sock>(
             let (key, val) = (parsed_cmd[0], parsed_cmd[1]);
 
             match key {
+                "update_only" => match val.parse::<bool>().map(|val| update_only = val) {
+                    Ok(_) => {}
+                    Err(_) => return EINVAL,
+                },
                 "remove" => match val.parse::<bool>() {
                     Ok(true) => remove = true,
                     Ok(false) => remove = false,
@@ -294,8 +309,9 @@ fn api_set_peer<T: Tun, S: Sock>(
                 },
                 "public_key" => {
                     // Indicates a new peer section. Commit changes for current peer, and continue to next peer
-                    d.update_peer(
+                    let res = d.update_peer(
                         pub_key,
+                        update_only,
                         remove,
                         replace_ips,
                         endpoint,
@@ -303,8 +319,11 @@ fn api_set_peer<T: Tun, S: Sock>(
                         keepalive,
                         preshared_key,
                     );
+                    if res.is_err() {
+                        return EINVAL;
+                    }
                     match val.parse::<X25519PublicKey>() {
-                        Ok(key) => return api_set_peer::<T, S>(reader, d, key),
+                        Ok(key) => return api_set_peer::<T, S, R>(reader, d, key),
                         Err(_) => return EINVAL,
                     }
                 }

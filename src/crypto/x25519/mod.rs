@@ -48,7 +48,7 @@ pub mod SystemRandom {
 }
 
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 /// A secret X25519 key.
 pub struct X25519SecretKey {
     internal: [u8; 32],

@@ -18,6 +18,8 @@ mod tests {
     use std::thread;
     use std::time::Duration;
 
+    type StatsFn = Box<dyn Fn() -> (Option<u64>, usize, usize, f32, Option<u32>)>;
+
     // Simple counter, atomically increasing by one each call
     struct AtomicCounter {
         ctr: AtomicUsize,
@@ -174,7 +176,7 @@ mod tests {
         peer_static_public: &str,
         logger: Logger,
         close: Arc<AtomicBool>,
-    ) -> UdpSocket {
+    ) -> (UdpSocket, StatsFn) {
         let static_private = static_private.parse().unwrap();
         let peer_static_public = peer_static_public.parse().unwrap();
 
@@ -191,6 +193,11 @@ mod tests {
         peer.set_logger(logger);
 
         let peer: Arc<Box<Tunn>> = Arc::from(peer);
+
+        let peer_stats = {
+            let peer = peer.clone();
+            Box::new(move || peer.stats())
+        };
 
         let (iface_socket_ret, iface_socket) = connected_sock_pair();
 
@@ -298,7 +305,7 @@ mod tests {
             thread::sleep(Duration::from_millis(200));
         });
 
-        iface_socket_ret
+        (iface_socket_ret, peer_stats)
     }
 
     fn connected_sock_pair() -> (UdpSocket, UdpSocket) {
@@ -317,7 +324,7 @@ mod tests {
         (encode(secret_key.as_bytes()), encode(public_key.as_bytes()))
     }
 
-    fn wireguard_test_pair() -> (UdpSocket, UdpSocket, Arc<AtomicBool>) {
+    fn wireguard_test_pair() -> ((UdpSocket, StatsFn), (UdpSocket, StatsFn), Arc<AtomicBool>) {
         let (s_sock, c_sock) = connected_sock_pair();
         let close = Arc::new(AtomicBool::new(false));
         let server_pair = key_pair();
@@ -330,7 +337,7 @@ mod tests {
             slog::o!(),
         );
 
-        let s_iface = wireguard_test_peer(
+        let s = wireguard_test_peer(
             s_sock,
             &server_pair.0,
             &client_pair.1,
@@ -338,7 +345,7 @@ mod tests {
             close.clone(),
         );
 
-        let c_iface = wireguard_test_peer(
+        let c = wireguard_test_peer(
             c_sock,
             &client_pair.0,
             &server_pair.1,
@@ -346,15 +353,20 @@ mod tests {
             close.clone(),
         );
 
-        (s_iface, c_iface, close)
+        (s, c, close)
     }
 
     #[test]
     fn wireguard_handshake() {
         // Test the connection is successfully established and some packets are passed around
         {
-            let (peer_iface_socket_sender, client_iface_socket_sender, close) =
-                wireguard_test_pair();
+            let (
+                (peer_iface_socket_sender, peer_stats),
+                (client_iface_socket_sender, client_stats),
+                close,
+            ) = wireguard_test_pair();
+            assert_eq!((None, 0, 0, 0.0, None), peer_stats());
+            assert_eq!((None, 0, 0, 0.0, None), client_stats());
 
             client_iface_socket_sender
                 .set_read_timeout(Some(Duration::from_millis(1000)))
@@ -382,6 +394,18 @@ mod tests {
             }
 
             close.store(true, Ordering::Relaxed);
+
+            // Keepalive is 32 bytes, 'test' grows to 56 bytes and 'check' to 57.
+            let expected_client_rx_bytes = 64 * (56 + 57);
+            let expected_client_tx_bytes = 32 + expected_client_rx_bytes;
+
+            let (_, client_tx_bytes, client_rx_bytes, _, _) = client_stats();
+            assert_eq!(expected_client_tx_bytes, client_tx_bytes);
+            assert_eq!(expected_client_rx_bytes, client_rx_bytes);
+
+            let (_, peer_tx_bytes, peer_rx_bytes, _, _) = peer_stats();
+            assert_eq!(expected_client_rx_bytes, peer_tx_bytes);
+            assert_eq!(expected_client_tx_bytes, peer_rx_bytes);
         }
     }
 
@@ -479,7 +503,8 @@ mod tests {
             &wg.public_key,
             logger.new(o!()),
             close.clone(),
-        );
+        )
+        .0;
 
         c_iface
             .set_read_timeout(Some(Duration::from_millis(1000)))
@@ -524,7 +549,8 @@ mod tests {
             &wg.public_key,
             logger,
             close.clone(),
-        );
+        )
+        .0;
 
         c_iface
             .set_read_timeout(Some(Duration::from_millis(1000)))
