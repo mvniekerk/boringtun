@@ -253,6 +253,30 @@ impl<T: Tun, S: Sock> DeviceHandle<T, S> {
         }
     }
 
+    pub fn set_iface(&mut self, new_iface: T) -> Result<(), Error> {
+        // Even though device struct is not being written to, we still take a write lock on device to stop the event loop
+        // The event loop must be stopped so that the old iface event handler can be safelly cleared.
+        // See clear_event_by_fd() function description
+        self.device
+            .read()
+            .try_writeable(
+                |device| device.trigger_yield(),
+                |device| {
+                    device.cancel_yield();
+                    unsafe {
+                        device.queue.clear_event_by_fd(device.iface.as_raw_fd());
+                    }
+                    device.register_iface_handler(Arc::new(new_iface.set_non_blocking()?))?;
+                    Ok::<(), Error>(())
+                },
+            )
+            // TODO: Not sure about casting none to error here
+            // TODO this is test code
+            .unwrap_or(Err(Error::EventQueue(
+                "Failed to get device lock when setting tunnel".to_string(),
+            )))
+    }
+
     fn event_loop(_i: usize, device: &Lock<Device<T, S>>) {
         #[cfg(target_os = "linux")]
         let mut thread_local = ThreadData {
