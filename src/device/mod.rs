@@ -114,6 +114,7 @@ pub trait Tun: 'static + AsRawFd + Sized + Send + Sync {
     fn new(name: &str) -> Result<Self, Error>;
     #[cfg(not(target_os = "windows"))]
     fn new_from_fd(fd: RawFd) -> Result<Self, Error>;
+    fn from_tun_fd(fd: RawFd) -> Result<TunSocket, Error>;
     fn set_non_blocking(self) -> Result<Self, Error>;
 
     fn name(&self) -> Result<String, Error>;
@@ -257,7 +258,7 @@ impl<T: Tun, S: Sock> DeviceHandle<T, S> {
         // Even though device struct is not being written to, we still take a write lock on device to stop the event loop
         // The event loop must be stopped so that the old iface event handler can be safelly cleared.
         // See clear_event_by_fd() function description
-        self.device
+         self.device
             .read()
             .try_writeable(
                 |device| device.trigger_yield(),
@@ -266,8 +267,7 @@ impl<T: Tun, S: Sock> DeviceHandle<T, S> {
                     unsafe {
                         device.queue.clear_event_by_fd(device.iface.as_raw_fd());
                     }
-                    device.register_iface_handler(Arc::new(new_iface.set_non_blocking()?))?;
-                    Ok::<(), Error>(())
+                    device.register_iface_handler(Arc::new(new_iface.set_non_blocking()?))
                 },
             )
             // TODO: Not sure about casting none to error here
