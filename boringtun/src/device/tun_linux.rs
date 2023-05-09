@@ -167,6 +167,33 @@ impl TunSocket {
         Ok(TunSocket { fd, name })
     }
 
+    fn from_tun_fd(fd: RawFd) -> Result<TunSocket, Error> {
+        #[cfg(target_os = "linux")]
+        let ifr = ifreq {
+            ifr_name: [0; IFNAMSIZ],
+            ifr_ifru: IfrIfru { ifru_intval: 0 },
+        };
+
+        #[cfg(target_os = "android")]
+        let ifr = ifreq {
+            ifr_name: [0; IFNAMSIZ],
+            ifr_ifru: IfrIfru { ifru_intval: 0 },
+        };
+
+        if unsafe { ioctl(fd, TUNGETIFF as _, &ifr) } < 0 {
+            return Err(Error::IOCtl(errno_str()));
+        }
+        let flags = unsafe { ifr.ifr_ifru.ifru_flags };
+        if flags & IFF_TUN as c_short == 0 {
+            return Err(Error::InvalidTunnelName);
+        }
+        let name = std::str::from_utf8(&ifr.ifr_name[..])
+            .map_err(|_| Error::InvalidTunnelName)?
+            .to_owned();
+
+        Ok(TunSocket { fd, name })
+    }
+
     pub fn set_non_blocking(self) -> Result<TunSocket, Error> {
         match unsafe { fcntl(self.fd, F_GETFL) } {
             -1 => Err(Error::FCntl(errno_str())),
