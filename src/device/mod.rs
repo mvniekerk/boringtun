@@ -267,11 +267,11 @@ impl<T: Tun, S: Sock> DeviceHandle<T, S> {
                     unsafe {
                         device.queue.clear_event_by_fd(device.iface.as_raw_fd());
                     }
-                    device.register_iface_handler(Arc::new(new_iface.set_non_blocking()?))
+                    device.iface = Arc::new(new_iface.set_non_blocking()?);
+                    device.register_iface_handler(device.iface.clone())
                 },
             )
-            // TODO: Not sure about casting none to error here
-            // TODO this is test code
+
             .unwrap_or(Err(Error::EventQueue(
                 "Failed to get device lock when setting tunnel".to_string(),
             )))
