@@ -265,6 +265,7 @@ impl DeviceHandle {
                 thread_local.iface = device_lock.iface.clone();
             }
             // The event loop keeps a read lock on the device, because we assume write access is rarely needed
+            let mut device_lock = device.read();
             let queue = Arc::clone(&device_lock.queue);
 
             loop {
