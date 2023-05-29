@@ -261,8 +261,8 @@ impl DeviceHandle {
             let mut device_lock = device.read();
             #[cfg(not(target_os = "linux"))]
             if device_lock.update_seq != thread_local.update_seq {
-                thread_local.update_seq = device_lock.update_seq;
-                thread_local.iface = device_lock.iface.clone();
+                DeviceHandle::clean_thread_local(&thread_local, thread_id, &mut device_lock);
+                thread_local = DeviceHandle::new_thread_local(thread_id, &device_lock)
             }
             // The event loop keeps a read lock on the device, because we assume write access is rarely needed
             let mut device_lock = device.read();
@@ -294,10 +294,22 @@ impl DeviceHandle {
         }
     }
 
-    fn new_thread_local(
-        thread_id: usize,
-        device_lock: &LockReadGuard<Device>,
-    ) -> ThreadData {
+    fn clean_thread_local(old: &ThreadData, thread_id: usize, device_lock: &mut LockReadGuard<Device>) {
+        if thread_id == 0 || !device_lock.config.use_multi_queue {
+            device_lock
+                .try_writeable(
+                    |device| device.trigger_yield(),
+                    |device| {
+                        unsafe {
+                            device.queue.clear_event_by_fd(old.iface.as_raw_fd());
+                        }
+                        device.cancel_yield();
+                    }
+            ).ok_or(Error::IOCtl("Failed to get device lock when setting tunnel".to_string())).unwrap(); // TODO unwrap
+        }
+    }
+
+    fn new_thread_local(thread_id: usize, device_lock: &LockReadGuard<Device>) -> ThreadData {
         #[cfg(target_os = "linux")]
         let t_local = ThreadData {
             src_buf: [0u8; MAX_UDP_SIZE],
