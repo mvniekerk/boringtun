@@ -92,6 +92,8 @@ pub enum Error {
     DropPrivileges(String),
     #[error("Api socket error")]
     ApiSocket(#[from] std::io::Error),
+    #[error("Set tunnel error {0}")]
+    SetTunnel(String),
 }
 
 // What the event loop should do after a handler returns
@@ -171,6 +173,7 @@ pub struct Device<T: Tun, S: Sock> {
 
     listen_port: u16,
     fwmark: Option<u32>,
+    #[cfg(not(target_os = "linux"))]
     update_seq: u32,
 
     iface: Arc<T>,
@@ -198,6 +201,7 @@ struct ThreadData<T: Tun> {
     iface: Arc<T>,
     src_buf: [u8; MAX_UDP_SIZE],
     dst_buf: [u8; MAX_UDP_SIZE],
+    #[cfg(not(target_os = "linux"))]
     update_seq: u32,
 }
 
@@ -256,6 +260,7 @@ impl<T: Tun, S: Sock> DeviceHandle<T, S> {
         }
     }
 
+    #[cfg(not(target_os = "linux"))]
     pub fn set_iface(&mut self, new_iface: T) -> Result<(), Error> {
         // Even though device struct is not being written to, we still take a write lock on device to stop the event loop
         self
@@ -265,24 +270,28 @@ impl<T: Tun, S: Sock> DeviceHandle<T, S> {
                 |device| device.trigger_yield(),
                 |device| {
                     (device.update_seq, _) = device.update_seq.overflowing_add(1);
+                    unsafe {
+                        device.queue.clear_event_by_fd(device.iface.as_raw_fd());
+                    }
                     device.iface = Arc::new(new_iface.set_non_blocking()?);
                     device.register_iface_handler(device.iface.clone())?;
                     device.cancel_yield();
 
                     Ok(())
                 }
-            ).ok_or(Error::IOCtl("Failed to get device lock when setting tunnel".to_string()))?
+            ).ok_or(Error::SetTunnel("Failed to get device lock when setting tunnel".to_string()))?
     }
 
     fn event_loop(thread_id: usize, device: &Lock<Device<T, S>>) {
         let mut thread_local = DeviceHandle::new_thread_local(thread_id, &device.read());
         loop {
             let mut device_lock = device.read();
+            #[cfg(not(target_os = "linux"))]
             if device_lock.update_seq != thread_local.update_seq {
-                DeviceHandle::clean_thread_local(&thread_local, thread_id, &mut device_lock);
-                thread_local = DeviceHandle::new_thread_local(thread_id, &device_lock)
+                thread_local.update_seq = device_lock.update_seq;
+                thread_local.iface = device_lock.iface.clone();
             }
-            // The event loop keeps a read lock on the device, because we assume write access is rarely needed
+                // The event loop keeps a read lock on the device, because we assume write access is rarely needed
             let queue = Arc::clone(&device_lock.queue);
 
             loop {
@@ -304,21 +313,6 @@ impl<T: Tun, S: Sock> DeviceHandle<T, S> {
                     WaitResult::Error(e) => error!(device_lock.config.logger, "Poll error {:}", e),
                 }
             }
-        }
-    }
-
-    fn clean_thread_local(old: &ThreadData<T>, thread_id: usize, device_lock: &mut LockReadGuard<Device<T, S>>) {
-        if thread_id == 0 || !device_lock.config.use_multi_queue {    
-            device_lock
-                .try_writeable(
-                    |device| device.trigger_yield(),
-                    |device| {
-                        unsafe {
-                            device.queue.clear_event_by_fd(old.iface.as_raw_fd());
-                        }
-                        device.cancel_yield();
-                    }
-            ).ok_or(Error::IOCtl("Failed to get device lock when setting tunnel".to_string())).unwrap(); // TODO unwrap
         }
     }
 
@@ -345,7 +339,6 @@ impl<T: Tun, S: Sock> DeviceHandle<T, S> {
 
                 iface_local
             },
-            update_seq: device_lock.update_seq,
         };
 
         #[cfg(not(target_os = "linux"))]
@@ -526,6 +519,7 @@ impl<T: Tun, S: Sock> Device<T, S> {
             cleanup_paths: Default::default(),
             mtu: AtomicUsize::new(mtu),
             rate_limiter: None,
+            #[cfg(not(target_os = "linux"))]
             update_seq: 0,
         };
 
