@@ -162,7 +162,7 @@ impl Tun for TunSocket {
         Ok(TunSocket { fd, name })
     }
 
-    fn from_tun_fd(fd: RawFd) -> Result<TunSocket, Error> {
+    fn new_from_tun_fd(fd: RawFd) -> Result<TunSocket, Error> {
         #[cfg(target_os = "linux")]
         let ifr = ifreq {
             ifr_name: [0; IFNAMSIZ],
