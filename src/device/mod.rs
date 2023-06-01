@@ -270,6 +270,7 @@ impl<T: Tun, S: Sock> DeviceHandle<T, S> {
                 |device| device.trigger_yield(),
                 |device| {
                     (device.update_seq, _) = device.update_seq.overflowing_add(1);
+                    // Because the event loop is stopped now, this is safe (see clear_event_by_fd() comment)
                     unsafe {
                         device.queue.clear_event_by_fd(device.iface.as_raw_fd());
                     }
