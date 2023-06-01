@@ -92,8 +92,8 @@ pub enum Error {
     DropPrivileges(String),
     #[error("Api socket error")]
     ApiSocket(#[from] std::io::Error),
-    #[error("Set tunnel error {0}")]
-    SetTunnel(String),
+    #[error("Set tunnel error: Failed to get device lock when setting tunnel")]
+    SetTunnel,
 }
 
 // What the event loop should do after a handler returns
@@ -280,7 +280,7 @@ impl<T: Tun, S: Sock> DeviceHandle<T, S> {
 
                     Ok(())
                 }
-            ).ok_or(Error::SetTunnel("Failed to get device lock when setting tunnel".to_string()))?
+            ).ok_or(Error::SetTunnel)?
     }
 
     fn event_loop(thread_id: usize, device: &Lock<Device<T, S>>) {
