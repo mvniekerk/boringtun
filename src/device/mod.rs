@@ -116,7 +116,6 @@ pub trait Tun: 'static + AsRawFd + Sized + Send + Sync {
     fn new(name: &str) -> Result<Self, Error>;
     #[cfg(not(target_os = "windows"))]
     fn new_from_fd(fd: RawFd) -> Result<Self, Error>;
-    fn new_from_tun_fd(fd: RawFd) -> Result<TunSocket, Error>;
     fn set_non_blocking(self) -> Result<Self, Error>;
 
     fn name(&self) -> Result<String, Error>;
