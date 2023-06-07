@@ -261,8 +261,8 @@ impl DeviceHandle {
             let mut device_lock = device.read();
             #[cfg(not(target_os = "linux"))]
             if device_lock.update_seq != thread_local.update_seq {
-                DeviceHandle::clean_thread_local(&thread_local, thread_id, &mut device_lock);
-                thread_local = DeviceHandle::new_thread_local(thread_id, &device_lock)
+                thread_local.update_seq = device_lock.update_seq;
+                thread_local.iface = device_lock.iface.clone();
             }
             // The event loop keeps a read lock on the device, because we assume write access is rarely needed
             let queue = Arc::clone(&device_lock.queue);
@@ -308,7 +308,10 @@ impl DeviceHandle {
         }
     }
 
-    fn new_thread_local(thread_id: usize, device_lock: &LockReadGuard<Device>) -> ThreadData {
+    fn new_thread_local(
+        thread_id: usize,
+        device_lock: &LockReadGuard<Device>,
+    ) -> ThreadData {
         #[cfg(target_os = "linux")]
         let t_local = ThreadData {
             src_buf: [0u8; MAX_UDP_SIZE],
