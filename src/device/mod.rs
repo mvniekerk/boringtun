@@ -262,8 +262,7 @@ impl<T: Tun, S: Sock> DeviceHandle<T, S> {
     #[cfg(not(target_os = "linux"))]
     pub fn set_iface(&mut self, new_iface: T) -> Result<(), Error> {
         // Even though device struct is not being written to, we still take a write lock on device to stop the event loop
-        self
-            .device
+        self.device
             .read()
             .try_writeable(
                 |device| device.trigger_yield(),
@@ -278,8 +277,9 @@ impl<T: Tun, S: Sock> DeviceHandle<T, S> {
                     device.cancel_yield();
 
                     Ok(())
-                }
-            ).ok_or(Error::SetTunnel)?
+                },
+            )
+            .ok_or(Error::SetTunnel)?
     }
 
     fn event_loop(thread_id: usize, device: &Lock<Device<T, S>>) {
@@ -291,7 +291,7 @@ impl<T: Tun, S: Sock> DeviceHandle<T, S> {
                 thread_local.update_seq = device_lock.update_seq;
                 thread_local.iface = device_lock.iface.clone();
             }
-                // The event loop keeps a read lock on the device, because we assume write access is rarely needed
+            // The event loop keeps a read lock on the device, because we assume write access is rarely needed
             let queue = Arc::clone(&device_lock.queue);
 
             loop {
@@ -316,7 +316,10 @@ impl<T: Tun, S: Sock> DeviceHandle<T, S> {
         }
     }
 
-    fn new_thread_local(thread_id: usize, device_lock: &LockReadGuard<Device<T, S>>) -> ThreadData<T> {
+    fn new_thread_local(
+        thread_id: usize,
+        device_lock: &LockReadGuard<Device<T, S>>,
+    ) -> ThreadData<T> {
         #[cfg(target_os = "linux")]
         let t_local = ThreadData {
             src_buf: [0u8; MAX_UDP_SIZE],
@@ -345,8 +348,8 @@ impl<T: Tun, S: Sock> DeviceHandle<T, S> {
         let t_local = ThreadData {
             src_buf: [0u8; MAX_UDP_SIZE],
             dst_buf: [0u8; MAX_UDP_SIZE],
-            iface: Arc::clone(&iface_local.iface),
-            update_seq: iface_local.update_seq,
+            iface: Arc::clone(&device_lock.iface),
+            update_seq: device_lock.update_seq,
         };
 
         t_local
