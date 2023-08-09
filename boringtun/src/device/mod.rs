@@ -293,21 +293,6 @@ impl DeviceHandle {
         }
     }
 
-    fn clean_thread_local(old: &ThreadData, thread_id: usize, device_lock: &mut LockReadGuard<Device>) {
-        if thread_id == 0 || !device_lock.config.use_multi_queue {
-            device_lock
-                .try_writeable(
-                    |device| device.trigger_yield(),
-                    |device| {
-                        unsafe {
-                            device.queue.clear_event_by_fd(old.iface.as_raw_fd());
-                        }
-                        device.cancel_yield();
-                    }
-            ).ok_or(Error::IOCtl("Failed to get device lock when setting tunnel".to_string())).unwrap(); // TODO unwrap
-        }
-    }
-
     fn new_thread_local(
         thread_id: usize,
         device_lock: &LockReadGuard<Device>,
@@ -341,7 +326,7 @@ impl DeviceHandle {
             src_buf: [0u8; MAX_UDP_SIZE],
             dst_buf: [0u8; MAX_UDP_SIZE],
             iface: Arc::clone(&device_lock.iface),
-            update_seq: iface_local.update_seq,
+            update_seq: device_lock.update_seq,
         };
 
         t_local

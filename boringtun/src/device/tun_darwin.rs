@@ -169,7 +169,7 @@ impl TunSocket {
         Ok(TunSocket { fd })
     }
 
-    fn new_from_fd(fd: RawFd) -> Result<TunSocket, Error> {
+    pub fn new_from_fd(fd: RawFd) -> Result<TunSocket, Error> {
         Ok(TunSocket { fd })
     }
 
