@@ -20,7 +20,6 @@ use std::convert::{TryFrom, TryInto};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use std::time::Duration;
-use slog::Logger;
 
 /// The default value to use for rate limiting, when no other rate limiter is defined
 const PEER_HANDSHAKE_RATE_LIMIT: u64 = 10;
@@ -79,7 +78,6 @@ struct TunnInner {
     rate_limiter: Arc<RateLimiter>,
 
     pub peer_static_public: x25519_dalek::PublicKey,
-    pub logger: Logger,
 }
 
 type MessageType = u32;
@@ -336,7 +334,6 @@ impl TunnInner {
             rate_limiter: rate_limiter.unwrap_or_else(|| {
                 Arc::new(RateLimiter::new(&static_public, PEER_HANDSHAKE_RATE_LIMIT))
             }),
-            logger: slog::Logger::root(slog::Discard, slog::o!()),
         };
 
         Ok(tunn)
