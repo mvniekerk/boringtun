@@ -37,7 +37,7 @@ impl FromStr for AllowedIP {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-            let ip: Vec<&str> = s.split('/').collect();
+        let ip: Vec<&str> = s.split('/').collect();
         if ip.len() != 2 {
             return Err("Invalid IP format".to_owned());
         }

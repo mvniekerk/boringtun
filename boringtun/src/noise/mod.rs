@@ -251,7 +251,7 @@ impl Tunn {
     pub fn set_persistent_keepalive(&self, keepalive: u16) {
         self.inner.write().set_persistent_keepalive(keepalive);
     }
-    
+
     pub fn time_since_last_handshake(&self) -> Option<Duration> {
         self.inner.read().time_since_last_handshake()
     }

@@ -246,8 +246,9 @@ impl DeviceHandle {
                     device.cancel_yield();
 
                     Ok(())
-                }
-            ).ok_or(Error::SetTunnel)?
+                },
+            )
+            .ok_or(Error::SetTunnel)?
     }
 
     fn event_loop(thread_id: usize, device: &Lock<Device>) {
@@ -293,10 +294,7 @@ impl DeviceHandle {
         }
     }
 
-    fn new_thread_local(
-        thread_id: usize,
-        device_lock: &LockReadGuard<Device>,
-    ) -> ThreadData {
+    fn new_thread_local(thread_id: usize, device_lock: &LockReadGuard<Device>) -> ThreadData {
         #[cfg(target_os = "linux")]
         let t_local = ThreadData {
             src_buf: [0u8; MAX_UDP_SIZE],
@@ -402,7 +400,8 @@ impl Device {
             }
 
             for AllowedIP { addr, cidr } in allowed_ips {
-                self.peers_by_ip.insert(*addr, *cidr as _, Arc::clone(&peer));
+                self.peers_by_ip
+                    .insert(*addr, *cidr as _, Arc::clone(&peer));
             }
         } else {
             if update_only {
@@ -455,7 +454,7 @@ impl Device {
 
         for AllowedIP { addr, cidr } in allowed_ips {
             self.peers_by_ip
-                .insert( *addr, *cidr as _, Arc::clone(&peer));
+                .insert(*addr, *cidr as _, Arc::clone(&peer));
         }
 
         tracing::info!("Peer added");
@@ -467,7 +466,7 @@ impl Device {
         Self::new_with_tun(TunSocket::new(name)?, config)
     }
 
-    pub fn new_with_tun(tun: TunSocket, config: DeviceConfig) -> Result<Device, Error> {            
+    pub fn new_with_tun(tun: TunSocket, config: DeviceConfig) -> Result<Device, Error> {
         let poll = EventPoll::<Handler>::new()?;
 
         // Create a tunnel device
@@ -837,12 +836,8 @@ impl Device {
                     peer.set_endpoint(addr);
                     if d.config.use_connected_socket {
                         if let Ok(sock) = peer.connect_endpoint(d.listen_port, d.fwmark) {
-                            d.register_conn_handler(
-                                Arc::clone(peer),
-                                sock,
-                                ip_addr,
-                            )
-                            .unwrap();
+                            d.register_conn_handler(Arc::clone(peer), sock, ip_addr)
+                                .unwrap();
                         }
                     }
 

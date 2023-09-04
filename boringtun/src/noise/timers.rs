@@ -17,7 +17,6 @@ mod _instant_boottime;
 #[cfg(any(target_os = "android", target_os = "ios"))]
 use _instant_boottime::Instant;
 
-
 // Some constants, represent time in seconds
 // https://www.wireguard.com/papers/wireguard.pdf#page=14
 const REKEY_AFTER_TIME: Duration = Duration::from_secs(120);
