@@ -776,6 +776,11 @@ impl Device {
                         Some(peer) => peer,
                     };
 
+                    tracing::info!(
+                        "Pkt2 -> ({:?})",
+                        t.iface.name(),
+                    );
+
                     // We found a peer, use it to decapsulate the message+
                     let mut flush = false; // Are there packets to send from the queue?
                     match peer
@@ -869,9 +874,19 @@ impl Device {
 
                 while let Ok(src) = udp.read(&mut t.src_buf[..]) {
                     let mut flush = false;
-                    match peer
+                    tracing::info!(
+                        "Pkt0 -> ({:?})",
+                        iface.name(),
+                    );
+                    let a = peer
                         .tunnel
-                        .decapsulate(Some(peer_addr), src, &mut t.dst_buf[..])
+                        .decapsulate(Some(peer_addr), src, &mut t.dst_buf[..]);
+
+                    tracing::info!(
+                        "INCOMING {:?}",
+                        a
+                    );
+                    match a
                     {
                         TunnResult::Done => {}
                         TunnResult::Err(e) => {
@@ -883,6 +898,9 @@ impl Device {
                             udp.write(packet);
                         }
                         TunnResult::WriteToTunnelV4(packet, addr) => {
+                            tracing::info!(
+                                "Pkt -> TunnIface4"
+                            );
                             if let Some(callback) = &d.config.firewall_process_inbound_callback {
                                 if !callback(&peer.tunnel.peer_static_public().to_bytes(), packet) {
                                     continue;
@@ -899,6 +917,9 @@ impl Device {
                             }
                         }
                         TunnResult::WriteToTunnelV6(packet, addr) => {
+                            tracing::info!(
+                                "Pkt -> TunnIface6"
+                            );
                             if let Some(callback) = &d.config.firewall_process_inbound_callback {
                                 if !callback(&peer.tunnel.peer_static_public().to_bytes(), packet) {
                                     continue;
@@ -988,7 +1009,9 @@ impl Device {
                             continue;
                         }
                     }
-
+                    tracing::info!(
+                        "Pkt1 ->",
+                    );
                     match peer.tunnel.encapsulate(src, &mut t.dst_buf[..]) {
                         TunnResult::Done => {}
                         TunnResult::Err(e) => {
