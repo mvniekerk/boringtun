@@ -776,6 +776,10 @@ impl Device {
                         Some(peer) => peer,
                     };
 
+                    let mut public_key = String::with_capacity(64);
+                    for byte in peer.tunnel.peer_static_public().as_bytes() {
+                        public_key.push_str(&format!("{:02X}", byte));
+                    }
                     // We found a peer, use it to decapsulate the message+
                     let mut flush = false; // Are there packets to send from the queue?
                     match peer
@@ -796,11 +800,12 @@ impl Device {
                             }
                             if peer.is_allowed_ip(addr) {
                                 t.iface.write4(packet);
-                                tracing::info!(
-                                    "Pkt -> TunnIface4 ({:?}), len: {}, src_addr: {}",
-                                    t.iface.name(),
-                                    packet.len(),
-                                    addr
+                                tracing::trace!(
+                                    message = "Writing packet to tunnel v4",
+                                    interface = ?t.iface.name(),
+                                    packet_length = packet.len(),
+                                    src_addr = ?addr,
+                                    public_key = public_key
                                 );
                             }
                         }
@@ -812,11 +817,12 @@ impl Device {
                             }
                             if peer.is_allowed_ip(addr) {
                                 t.iface.write6(packet);
-                                tracing::info!(
-                                    "Pkt -> TunnIface6 ({:?}), len: {}, src_addr: {}",
-                                    t.iface.name(),
-                                    packet.len(),
-                                    addr
+                                tracing::trace!(
+                                    message = "Writing packet to tunnel v6",
+                                    interface = ?t.iface.name(),
+                                    packet_length = packet.len(),
+                                    src_addr = ?addr,
+                                    public_key = public_key
                                 );
                             }
                         }
@@ -867,6 +873,12 @@ impl Device {
                 let iface = &t.iface;
                 let mut iter = MAX_ITR;
 
+                let mut public_key = String::with_capacity(32);
+                for byte in peer.tunnel.peer_static_public().as_bytes() {
+                    let pub_symbol = format!("{:02X}", byte);
+                    public_key.push_str(&pub_symbol);
+                }
+
                 while let Ok(src) = udp.read(&mut t.src_buf[..]) {
                     let mut flush = false;
                     match peer
@@ -875,8 +887,9 @@ impl Device {
                     {
                         TunnResult::Done => {}
                         TunnResult::Err(e) => {
-                            tracing::error!(message="Decapsulate error", error=?e);
-                            eprintln!("Decapsulate error {:?}", e);
+                            tracing::error!(message="Decapsulate error",
+                            error=?e,
+                            public_key = public_key)
                         }
                         TunnResult::WriteToNetwork(packet) => {
                             flush = true;
@@ -890,11 +903,12 @@ impl Device {
                             }
                             if peer.is_allowed_ip(addr) {
                                 iface.write4(packet);
-                                tracing::info!(
-                                    "Pkt -> TunnIface4 ({:?}), len: {}, src_addr: {}",
-                                    iface.name(),
-                                    packet.len(),
-                                    addr
+                                tracing::trace!(
+                                    message = "Writing packet to tunnel v4",
+                                    interface = ?t.iface.name(),
+                                    packet_length = packet.len(),
+                                    src_addr = ?addr,
+                                    public_key = public_key
                                 );
                             }
                         }
@@ -906,11 +920,12 @@ impl Device {
                             }
                             if peer.is_allowed_ip(addr) {
                                 iface.write6(packet);
-                                tracing::info!(
-                                    "Pkt -> TunnIface6 ({:?}), len: {}, src_addr: {}",
-                                    iface.name(),
-                                    packet.len(),
-                                    addr
+                                tracing::trace!(
+                                    message = "Writing packet to tunnel v6",
+                                    interface = ?t.iface.name(),
+                                    packet_length = packet.len(),
+                                    src_addr = ?addr,
+                                    public_key = public_key
                                 );
                             }
                         }
@@ -989,10 +1004,18 @@ impl Device {
                         }
                     }
 
+                    let mut public_key = String::with_capacity(32);
+                    for byte in peer.tunnel.peer_static_public().as_bytes() {
+                        let pub_symbol = format!("{:02X}", byte);
+                        public_key.push_str(&pub_symbol);
+                    }
+
                     match peer.tunnel.encapsulate(src, &mut t.dst_buf[..]) {
                         TunnResult::Done => {}
                         TunnResult::Err(e) => {
-                            tracing::error!(message = "Encapsulate error", error = ?e)
+                            tracing::error!(message = "Encapsulate error",
+                            error = ?e,
+                            public_key = public_key)
                         }
                         TunnResult::WriteToNetwork(packet) => {
                             let endpoint = peer.endpoint();
@@ -1003,7 +1026,7 @@ impl Device {
                                     drop(endpoint);
                                     peer.shutdown_endpoint();
                                 } else {
-                                    tracing::info!(
+                                    tracing::trace!(
                                         "Pkt -> ConnSock ({:?}), len: {}, dst_addr: {}",
                                         addr,
                                         packet.len(),
@@ -1012,19 +1035,21 @@ impl Device {
                                 }
                             } else if let Some(addr @ SocketAddr::V4(_)) = endpoint.addr {
                                 udp4.sendto(packet, addr);
-                                tracing::info!(
-                                    "Pkt -> Udp4Sock ({:?}), len: {}, dst_addr: {}",
-                                    addr,
-                                    packet.len(),
-                                    dst_addr
+                                tracing::trace!(
+                                    message = "Writing packet to network v4",
+                                    interface = ?t.iface.name(),
+                                    packet_length = packet.len(),
+                                    src_addr = ?addr,
+                                    public_key = public_key
                                 );
                             } else if let Some(addr @ SocketAddr::V6(_)) = endpoint.addr {
                                 udp6.sendto(packet, addr);
-                                tracing::info!(
-                                    "Pkt -> Udp6Sock ({:?}), len: {}, dst_addr: {}",
-                                    addr,
-                                    packet.len(),
-                                    dst_addr
+                                tracing::trace!(
+                                    message = "Writing packet to network v6",
+                                    interface = ?t.iface.name(),
+                                    packet_length = packet.len(),
+                                    src_addr = ?addr,
+                                    public_key = public_key
                                 );
                             } else {
                                 tracing::error!("No endpoint");
