@@ -7,14 +7,15 @@ use std::mem;
 use std::ops::{Index, IndexMut};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_os = "tvos")))]
 use std::time::Instant;
 
-#[cfg(any(target_os = "android", target_os = "ios"))]
+#[cfg(any(target_os = "android", target_os = "ios", target_os = "tvos"))]
 #[cfg_attr(target_os = "android", path = "./_instant_boottime_android.rs")]
 #[cfg_attr(target_os = "ios", path = "./_instant_boottime_ios.rs")]
+#[cfg_attr(target_os = "tvos", path = "./_instant_boottime_tvos.rs")]
 mod _instant_boottime;
-#[cfg(any(target_os = "android", target_os = "ios"))]
+#[cfg(any(target_os = "android", target_os = "ios", target_os = "tvos"))]
 use _instant_boottime::Instant;
 
 // Some constants, represent time in seconds

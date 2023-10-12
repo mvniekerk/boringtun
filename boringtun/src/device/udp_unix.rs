@@ -19,7 +19,7 @@ pub struct UDPSocket {
 impl UDPSocket {
     fn bind4(self, port: u16) -> Result<UDPSocket, Error> {
         let addr = sockaddr_in {
-            #[cfg(any(target_os = "macos", target_os = "ios"))]
+            #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
             sin_len: std::mem::size_of::<sockaddr_in>() as u8,
             sin_family: AF_INET as _,
             sin_port: port.to_be(),
@@ -59,7 +59,7 @@ impl UDPSocket {
     fn connect4(self, dst: &SocketAddrV4) -> Result<UDPSocket, Error> {
         assert_eq!(self.version, 4);
         let addr = sockaddr_in {
-            #[cfg(any(target_os = "macos", target_os = "ios"))]
+            #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
             sin_len: std::mem::size_of::<sockaddr_in>() as u8,
             sin_family: AF_INET as _,
             sin_port: dst.port().to_be(),
@@ -103,7 +103,7 @@ impl UDPSocket {
     fn sendto4(&self, buf: &[u8], dst: SocketAddrV4) -> usize {
         assert_eq!(self.version, 4);
         let addr = sockaddr_in {
-            #[cfg(any(target_os = "macos", target_os = "ios"))]
+            #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
             sin_len: std::mem::size_of::<sockaddr_in>() as _,
             sin_family: AF_INET as _,
             sin_port: dst.port().to_be(),
@@ -182,7 +182,7 @@ impl UDPSocket {
 
     fn recvfrom4<'a>(&self, buf: &'a mut [u8]) -> Result<(SocketAddr, &'a mut [u8]), Error> {
         let mut addr = sockaddr_in {
-            #[cfg(any(target_os = "macos", target_os = "ios"))]
+            #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
             sin_len: 0,
             sin_family: 0,
             sin_port: 0,
@@ -328,7 +328,12 @@ impl UDPSocket {
         }
     }
 
-    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "tvos",
+        target_os = "android"
+    ))]
     pub fn set_fwmark(&self, _: u32) -> Result<(), Error> {
         Ok(())
     }
