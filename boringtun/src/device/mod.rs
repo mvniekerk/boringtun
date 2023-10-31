@@ -1063,4 +1063,8 @@ impl Device {
         )?;
         Ok(())
     }
+
+    pub fn iface(&self) -> &TunSocket {
+        &self.iface
+    }
 }
