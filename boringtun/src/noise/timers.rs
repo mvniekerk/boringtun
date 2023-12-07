@@ -119,6 +119,8 @@ impl TunnInner {
             TimeLastPacketReceived => {
                 self.timers.want_keepalive = true;
                 self.timers.want_handshake_since = None;
+                // This timer is never read
+                return;
             }
             TimeLastPacketSent => {
                 self.timers.want_keepalive = false;
