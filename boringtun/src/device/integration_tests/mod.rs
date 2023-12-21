@@ -268,9 +268,12 @@ mod tests {
                     use_connected_socket: true,
                     #[cfg(target_os = "linux")]
                     use_multi_queue: true,
-                    open_uapi_socket: false,
+                    open_uapi_socket: true,
                     #[cfg(target_os = "linux")]
                     uapi_fd: -1,
+                    protect: Arc::new(crate::device::MakeExternalBoringtunNoop),
+                    firewall_process_inbound_callback: None,
+                    firewall_process_outbound_callback: None,
                 },
             )
         }
@@ -487,14 +490,14 @@ mod tests {
         let wg = WGHandle::init("192.0.2.0".parse().unwrap(), "::2".parse().unwrap());
         assert!(wg.wg_get().ends_with("errno=0\n\n"));
         assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
-        assert_eq!(wg.wg_set_key(private_key), "errno=0\n\n");
+        assert_eq!(wg.wg_set_key(private_key.clone()), "errno=0\n\n");
 
         // Check that the response matches what we expect
         assert_eq!(
             wg.wg_get(),
             format!(
-                "own_public_key={}\nlisten_port={}\nerrno=0\n\n",
-                encode(own_public_key.as_bytes()),
+                "private_key={}\nlisten_port={}\nerrno=0\n\n",
+                encode(private_key.as_bytes()),
                 port
             )
         );
@@ -522,7 +525,7 @@ mod tests {
         assert_eq!(
             wg.wg_get(),
             format!(
-                "own_public_key={}\n\
+                "private_key={}\n\
                  listen_port={}\n\
                  public_key={}\n\
                  endpoint={}\n\
@@ -531,7 +534,7 @@ mod tests {
                  rx_bytes=0\n\
                  tx_bytes=0\n\
                  errno=0\n\n",
-                encode(own_public_key.as_bytes()),
+                encode(private_key.as_bytes()),
                 port,
                 encode(peer_pub_key.as_bytes()),
                 endpoint,
@@ -561,9 +564,12 @@ mod tests {
                 use_connected_socket: false,
                 #[cfg(target_os = "linux")]
                 use_multi_queue: true,
-                open_uapi_socket: false,
+                open_uapi_socket: true,
                 #[cfg(target_os = "linux")]
                 uapi_fd: -1,
+                protect: Arc::new(crate::device::MakeExternalBoringtunNoop),
+                firewall_process_inbound_callback: None,
+                firewall_process_outbound_callback: None,
             },
         );
 
@@ -720,9 +726,12 @@ mod tests {
                 use_connected_socket: false,
                 #[cfg(target_os = "linux")]
                 use_multi_queue: true,
-                open_uapi_socket: false,
+                open_uapi_socket: true,
                 #[cfg(target_os = "linux")]
                 uapi_fd: -1,
+                protect: Arc::new(crate::device::MakeExternalBoringtunNoop),
+                firewall_process_inbound_callback: None,
+                firewall_process_outbound_callback: None,
             },
         );
 
