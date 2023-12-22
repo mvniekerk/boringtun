@@ -109,6 +109,12 @@ pub trait MakeExternalBoringtun: Send + Sync {
     fn make_external(&self, socket: RawFd);
 }
 
+pub struct MakeExternalBoringtunNoop;
+
+impl MakeExternalBoringtun for MakeExternalBoringtunNoop {
+    fn make_external(&self, _socket: std::os::fd::RawFd) {}
+}
+
 pub struct DeviceHandle {
     pub device: Arc<Lock<Device>>, // The interface this handle owns
     threads: Vec<JoinHandle<()>>,
