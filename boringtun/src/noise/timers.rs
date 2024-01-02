@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use super::errors::WireGuardError;
-use crate::noise::{safe_duration::SafeDuration, TunnInner, TunnResult};
+use crate::noise::{safe_duration::SafeDuration as Duration, TunnInner, TunnResult};
 use std::mem;
 use std::ops::{Index, IndexMut};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -20,12 +20,12 @@ use _instant_boottime::Instant;
 
 // Some constants, represent time in seconds
 // https://www.wireguard.com/papers/wireguard.pdf#page=14
-const REKEY_AFTER_TIME: SafeDuration = SafeDuration::from_secs(120);
-const REJECT_AFTER_TIME: SafeDuration = SafeDuration::from_secs(180);
-const REKEY_ATTEMPT_TIME: SafeDuration = SafeDuration::from_secs(90);
-const REKEY_TIMEOUT: SafeDuration = SafeDuration::from_secs(5);
-const KEEPALIVE_TIMEOUT: SafeDuration = SafeDuration::from_secs(10);
-const COOKIE_EXPIRATION_TIME: SafeDuration = SafeDuration::from_secs(120);
+const REKEY_AFTER_TIME: Duration = Duration::from_secs(120);
+const REJECT_AFTER_TIME: Duration = Duration::from_secs(180);
+const REKEY_ATTEMPT_TIME: Duration = Duration::from_secs(90);
+const REKEY_TIMEOUT: Duration = Duration::from_secs(5);
+const KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(10);
+const COOKIE_EXPIRATION_TIME: Duration = Duration::from_secs(120);
 
 #[derive(Debug)]
 pub enum TimerName {
@@ -58,12 +58,12 @@ pub struct Timers {
     is_initiator: bool,
     /// Start time of the tunnel
     time_started: Instant,
-    timers: [SafeDuration; TimerName::Top as usize],
-    pub(super) session_timers: [SafeDuration; super::N_SESSIONS],
+    timers: [Duration; TimerName::Top as usize],
+    pub(super) session_timers: [Duration; super::N_SESSIONS],
     /// Did we receive data without sending anything back?
     want_keepalive: bool,
     /// How long ago did we send data without hearing back?
-    want_handshake_since: Option<SafeDuration>,
+    want_handshake_since: Option<Duration>,
     persistent_keepalive: usize,
     /// Should this timer call reset rr function (if not a shared rr instance)
     pub(super) should_reset_rr: bool,
@@ -100,14 +100,14 @@ impl Timers {
 }
 
 impl Index<TimerName> for Timers {
-    type Output = SafeDuration;
-    fn index(&self, index: TimerName) -> &SafeDuration {
+    type Output = Duration;
+    fn index(&self, index: TimerName) -> &Duration {
         &self.timers[index as usize]
     }
 }
 
 impl IndexMut<TimerName> for Timers {
-    fn index_mut(&mut self, index: TimerName) -> &mut SafeDuration {
+    fn index_mut(&mut self, index: TimerName) -> &mut Duration {
         &mut self.timers[index as usize]
     }
 }
@@ -132,7 +132,7 @@ impl TunnInner {
         }
 
         if time.is_zero() {
-            self.timers[timer_name] = SafeDuration::from_millis(1);
+            self.timers[timer_name] = Duration::from_millis(1);
         } else {
             self.timers[timer_name] = time;
         }
@@ -161,7 +161,7 @@ impl TunnInner {
         self.timers.clear();
     }
 
-    fn update_session_timers(&mut self, time_now: SafeDuration) {
+    fn update_session_timers(&mut self, time_now: Duration) {
         let timers = &mut self.timers;
 
         for (i, t) in timers.session_timers.iter_mut().enumerate() {
@@ -306,7 +306,7 @@ impl TunnInner {
                     // Persistent KEEPALIVE
                     if persistent_keepalive > 0
                         && ((now - self.timers[TimePersistentKeepalive]
-                            >= SafeDuration::from_secs(persistent_keepalive as _))
+                            >= Duration::from_secs(persistent_keepalive as _))
                             || self.time_since_last_handshake().is_none())
                     {
                         tracing::debug!("KEEPALIVE(PERSISTENT_KEEPALIVE)");
@@ -331,12 +331,11 @@ impl TunnInner {
     pub(super) fn time_since_last_handshake(&self) -> Option<std::time::Duration> {
         let current_session = self.current;
         if self.sessions[current_session % super::N_SESSIONS].is_some() {
-            let time_current: SafeDuration = Instant::now()
+            let time_current: Duration = Instant::now()
                 .duration_since(self.timers.time_started)
                 .into();
             let time_session_established = self.timers[TimeSessionEstablished];
-            let epoch_time: SafeDuration =
-                SystemTime::now().duration_since(UNIX_EPOCH).unwrap().into();
+            let epoch_time: Duration = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().into();
 
             if time_session_established.is_zero() {
                 None
