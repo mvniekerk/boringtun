@@ -1,8 +1,9 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use super::{errno, errno_str, Error};
+use super::{errno_str, Error};
 use libc::*;
+use std::io;
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::Arc;
@@ -100,7 +101,7 @@ impl UDPSocket {
         }
     }
 
-    fn sendto4(&self, buf: &[u8], dst: SocketAddrV4) -> usize {
+    fn sendto4(&self, buf: &[u8], dst: SocketAddrV4) -> io::Result<usize> {
         assert_eq!(self.version, 4);
         let addr = sockaddr_in {
             #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
@@ -123,12 +124,12 @@ impl UDPSocket {
                 std::mem::size_of::<sockaddr_in>() as _,
             )
         } {
-            -1 => 0,
-            n => n as usize,
+            -1 => Err(io::Error::last_os_error()),
+            n => Ok(n as usize),
         }
     }
 
-    fn sendto6(&self, buf: &[u8], dst: SocketAddrV6) -> usize {
+    fn sendto6(&self, buf: &[u8], dst: SocketAddrV6) -> io::Result<usize> {
         assert_eq!(self.version, 6);
         let mut addr: libc::sockaddr_in6 = unsafe { std::mem::zeroed() };
         addr.sin6_family = AF_INET6 as _;
@@ -145,12 +146,12 @@ impl UDPSocket {
                 std::mem::size_of::<sockaddr_in6>() as _,
             )
         } {
-            -1 => 0,
-            n => n as usize,
+            -1 => Err(io::Error::last_os_error()),
+            n => Ok(n as usize),
         }
     }
 
-    fn recvfrom6<'a>(&self, buf: &'a mut [u8]) -> Result<(SocketAddr, &'a mut [u8]), Error> {
+    fn recvfrom6<'a>(&self, buf: &'a mut [u8]) -> io::Result<(SocketAddr, &'a mut [u8])> {
         let mut addr: libc::sockaddr_in6 = unsafe { std::mem::zeroed() };
         let mut addr_len: socklen_t = std::mem::size_of::<sockaddr_in6>() as socklen_t;
 
@@ -166,7 +167,7 @@ impl UDPSocket {
         };
 
         if n == -1 {
-            return Err(Error::UDPRead(errno()));
+            return Err(io::Error::last_os_error());
         }
 
         // This is the endpoint
@@ -180,7 +181,7 @@ impl UDPSocket {
         Ok((SocketAddr::V6(origin), &mut buf[..n as usize]))
     }
 
-    fn recvfrom4<'a>(&self, buf: &'a mut [u8]) -> Result<(SocketAddr, &'a mut [u8]), Error> {
+    fn recvfrom4<'a>(&self, buf: &'a mut [u8]) -> io::Result<(SocketAddr, &'a mut [u8])> {
         let mut addr = sockaddr_in {
             #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
             sin_len: 0,
@@ -203,7 +204,7 @@ impl UDPSocket {
         };
 
         if n == -1 {
-            return Err(Error::UDPRead(errno()));
+            return Err(io::Error::last_os_error());
         }
 
         // This is the endpoint
@@ -215,10 +216,10 @@ impl UDPSocket {
         Ok((SocketAddr::V4(origin), &mut buf[..n as usize]))
     }
 
-    fn write_fd(fd: RawFd, src: &[u8]) -> usize {
+    fn write_fd(fd: RawFd, src: &[u8]) -> io::Result<usize> {
         match unsafe { send(fd, &src[0] as *const u8 as _, src.len(), 0) } {
-            -1 => 0,
-            n => n as usize,
+            -1 => Err(io::Error::last_os_error()),
+            n => Ok(n as usize),
         }
     }
 }
@@ -356,7 +357,7 @@ impl UDPSocket {
     /// Send buf to a remote address, returns 0 on error, or amount of data send on success
     /// # Panics
     /// When sending from an IPv4 socket to an IPv6 address and vice versa
-    pub fn sendto(&self, buf: &[u8], dst: SocketAddr) -> usize {
+    pub fn sendto(&self, buf: &[u8], dst: SocketAddr) -> io::Result<usize> {
         match dst {
             SocketAddr::V4(addr) => self.sendto4(buf, addr),
             SocketAddr::V6(addr) => self.sendto6(buf, addr),
@@ -364,7 +365,7 @@ impl UDPSocket {
     }
 
     /// Receives a message on a non-connected UDP socket and returns its contents and origin address
-    pub fn recvfrom<'a>(&self, buf: &'a mut [u8]) -> Result<(SocketAddr, &'a mut [u8]), Error> {
+    pub fn recvfrom<'a>(&self, buf: &'a mut [u8]) -> io::Result<(SocketAddr, &'a mut [u8])> {
         match self.version {
             4 => self.recvfrom4(buf),
             _ => self.recvfrom6(buf),
@@ -372,14 +373,14 @@ impl UDPSocket {
     }
 
     /// Sends a message on a connected UDP socket. Returns number of bytes successfully sent.
-    pub fn write(&self, src: &[u8]) -> usize {
+    pub fn write(&self, src: &[u8]) -> io::Result<usize> {
         UDPSocket::write_fd(self.fd, src)
     }
 
     /// Receives a message on a connected UDP socket and returns its contents
-    pub fn read<'a>(&self, dst: &'a mut [u8]) -> Result<&'a mut [u8], Error> {
+    pub fn read<'a>(&self, dst: &'a mut [u8]) -> io::Result<&'a mut [u8]> {
         match unsafe { recv(self.fd, &mut dst[0] as *mut u8 as _, dst.len(), 0) } {
-            -1 => Err(Error::UDPRead(errno())),
+            -1 => Err(io::Error::last_os_error()),
             n => Ok(&mut dst[..n as usize]),
         }
     }
