@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use super::errors::WireGuardError;
-use crate::noise::{TunnInner, TunnResult};
+use crate::noise::{safe_duration::SafeDuration as Duration, TunnInner, TunnResult};
 use std::mem;
 use std::ops::{Index, IndexMut};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(not(any(target_os = "android", target_os = "ios", target_os = "tvos")))]
 use std::time::Instant;
@@ -90,7 +90,7 @@ impl Timers {
     // We don't really clear the timers, but we set them to the current time to
     // so the reference time frame is the same
     pub(super) fn clear(&mut self) {
-        let now = Instant::now().duration_since(self.time_started);
+        let now = Instant::now().duration_since(self.time_started).into();
         for t in &mut self.timers[..] {
             *t = now;
         }
@@ -189,7 +189,7 @@ impl TunnInner {
 
         // All the times are counted from tunnel initiation, for efficiency our timers are rounded
         // to a second, as there is no real benefit to having highly accurate timers.
-        let now = time.duration_since(self.timers.time_started);
+        let now = time.duration_since(self.timers.time_started).into();
         self.timers[TimeCurrent] = now;
 
         self.update_session_timers(now);
@@ -283,8 +283,7 @@ impl TunnInner {
                     .timers
                     .want_handshake_since
                     .map(|want_handshake_since| {
-                        (now.saturating_sub(want_handshake_since))
-                            >= (KEEPALIVE_TIMEOUT + REKEY_TIMEOUT)
+                        (now - want_handshake_since) >= (KEEPALIVE_TIMEOUT + REKEY_TIMEOUT)
                     })
                     .unwrap_or_default()
                 {
@@ -329,12 +328,14 @@ impl TunnInner {
         TunnResult::Done
     }
 
-    pub(super) fn time_since_last_handshake(&self) -> Option<Duration> {
+    pub(super) fn time_since_last_handshake(&self) -> Option<std::time::Duration> {
         let current_session = self.current;
         if self.sessions[current_session % super::N_SESSIONS].is_some() {
-            let time_current = Instant::now().duration_since(self.timers.time_started);
+            let time_current: Duration = Instant::now()
+                .duration_since(self.timers.time_started)
+                .into();
             let time_session_established = self.timers[TimeSessionEstablished];
-            let epoch_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+            let epoch_time: Duration = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().into();
 
             if time_session_established.is_zero() {
                 None
