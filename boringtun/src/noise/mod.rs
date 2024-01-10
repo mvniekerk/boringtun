@@ -6,6 +6,8 @@ pub mod handshake;
 pub mod rate_limiter;
 pub mod safe_duration;
 
+#[cfg(test)]
+mod integration_tests;
 mod session;
 mod timers;
 
@@ -369,7 +371,7 @@ impl TunnInner {
             if !src.is_empty() {
                 self.timer_tick(TimerName::TimeLastDataPacketSent);
             }
-            self.tx_bytes += src.len();
+            self.tx_bytes += packet.len();
             return TunnResult::WriteToNetwork(packet);
         }
 
@@ -403,6 +405,7 @@ impl TunnInner {
             Ok(packet) => packet,
             Err(TunnResult::WriteToNetwork(cookie)) => {
                 dst[..cookie.len()].copy_from_slice(cookie);
+                self.tx_bytes += cookie.len();
                 return TunnResult::WriteToNetwork(&mut dst[..cookie.len()]);
             }
             Err(TunnResult::Err(e)) => return TunnResult::Err(e),
@@ -438,6 +441,10 @@ impl TunnInner {
 
         let (packet, session) = self.handshake.receive_handshake_initialization(p, dst)?;
 
+        // We received a valid handshake initialization
+        // Increase the rx_bytes accordingly
+        self.rx_bytes += HANDSHAKE_INIT_SZ;
+
         // Store new session in ring buffer
         let index = session.local_index();
         self.sessions[index % N_SESSIONS] = Some(session);
@@ -448,6 +455,9 @@ impl TunnInner {
 
         tracing::debug!(message = "Sending handshake_response", local_idx = index);
 
+        // We are ready to send a Handshake response
+        // Increase the tx_bytes accordingly
+        self.tx_bytes += packet.len();
         Ok(TunnResult::WriteToNetwork(packet))
     }
 
@@ -463,6 +473,10 @@ impl TunnInner {
         );
 
         let session = self.handshake.receive_handshake_response(p)?;
+        // We received a valid handshake response
+        // Increase the rx_bytes accordingly
+        self.rx_bytes += HANDSHAKE_RESP_SZ;
+
         let keepalive_packet = session.format_packet_data(&[], dst);
         // Store new session in ring buffer
         let l_idx = session.local_index();
@@ -489,6 +503,11 @@ impl TunnInner {
         );
 
         self.handshake.receive_cookie_reply(p)?;
+
+        // We received a valid cookie reply
+        // Increase the rx_bytes accordingly
+        self.rx_bytes += COOKIE_REPLY_SZ;
+
         self.timer_tick(TimerName::TimeLastPacketReceived);
         self.timer_tick(TimerName::TimeCookieReceived);
 
@@ -562,6 +581,8 @@ impl TunnInner {
                     self.timer_tick(TimerName::TimeLastHandshakeStarted);
                 }
                 self.timer_tick(TimerName::TimeLastPacketSent);
+                self.tx_bytes += packet.len();
+
                 TunnResult::WriteToNetwork(packet)
             }
             Err(e) => TunnResult::Err(e),
