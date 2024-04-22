@@ -144,6 +144,7 @@ pub struct Device {
     update_seq: u32,
 
     iface: Arc<TunSocket>,
+    closed: bool,
     udp4: Option<Arc<UDPSocket>>,
     udp6: Option<Arc<UDPSocket>>,
 
@@ -280,6 +281,7 @@ impl DeviceHandle {
                             Action::Continue => {}
                             Action::Yield => break,
                             Action::Exit => {
+                                device_lock.try_writeable(|_| {}, |dev| dev.closed = true);
                                 device_lock.trigger_exit();
                                 return;
                             }
@@ -485,6 +487,7 @@ impl Device {
         let mut device = Device {
             queue: Arc::new(poll),
             iface,
+            closed: false,
             config,
             exit_notice: Default::default(),
             yield_notice: Default::default(),
