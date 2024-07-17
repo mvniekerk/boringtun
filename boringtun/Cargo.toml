@@ -33,6 +33,9 @@ thiserror = "1.0"
 [target.'cfg(target_os="macos")'.dependencies]
 nix = "0.24.1"
 
+[target.'cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))'.dependencies]
+dispatch = { git = "https://github.com/NordSecurity/rust-dispatch.git", rev = "13447cd7221a74ebcce1277ae0cfc9a421a28ec5" }
+
 [dev-dependencies]
 tracing-subscriber = "0.3"
 criterion = { version = "0.3.5", features = ["html_reports"] }
