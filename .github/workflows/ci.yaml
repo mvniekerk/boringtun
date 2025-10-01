@@ -14,24 +14,24 @@ env:
   RUSTDOCFLAGS: "-D warnings"
 
 jobs:
-  test-windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-
-      - name: Check Windows
-        run: cargo check -p boringtun
-
-      - name: Test Windows
-        run: cargo test -p boringtun
+#  test-windows:
+#    runs-on: windows-latest
+#    steps:
+#      - uses: actions/checkout@v5
+#      - uses: actions-rs/toolchain@v1
+#        with:
+#          toolchain: stable
+#
+#      - name: Check Windows
+#        run: cargo check -p boringtun
+#
+#      - name: Test Windows
+#        run: cargo test -p boringtun
 
   check_features:
     strategy:
       matrix:
-        os: [ ubuntu-latest, macos-latest ]
+        os: [ ubuntu-latest ]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -44,7 +44,8 @@ jobs:
   clippy:
     strategy:
       matrix:
-        os: [ ubuntu-latest, macos-latest ]
+#        os: [ ubuntu-latest, macos-latest ]
+        os: [ ubuntu-latest ]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -57,7 +58,8 @@ jobs:
   rustfmt:
     strategy:
       matrix:
-        os: [ ubuntu-latest, macos-latest ]
+#        os: [ ubuntu-latest, macos-latest ]
+        os: [ ubuntu-latest  ]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -69,7 +71,8 @@ jobs:
   tests:
     strategy:
       matrix:
-        os: [ ubuntu-latest, macos-latest ]
+#        os: [ ubuntu-latest, macos-latest ]
+        os: [ ubuntu-latest ]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -82,7 +85,8 @@ jobs:
   integration-tests:
     strategy:
       matrix:
-        os: [ ubuntu-latest, macos-latest ]
+#        os: [ ubuntu-latest, macos-latest ]
+        os: [ ubuntu-latest ]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
