@@ -588,7 +588,7 @@ impl Device {
             .trigger_notification(self.yield_notice.as_ref().unwrap())
     }
 
-    pub(crate) fn trigger_exit(&self) {
+    pub fn trigger_exit(&self) {
         self.queue
             .trigger_notification(self.exit_notice.as_ref().unwrap())
     }
