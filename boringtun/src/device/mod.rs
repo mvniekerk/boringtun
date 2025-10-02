@@ -93,7 +93,7 @@ pub enum Error {
 }
 
 // What the event loop should do after a handler returns
-enum Action {
+pub enum Action {
     Continue, // Continue the loop
     Yield,    // Yield the read lock and acquire it again
     Exit,     // Stop the loop
@@ -132,12 +132,12 @@ impl Default for DeviceConfig {
 
 pub struct Device {
     key_pair: Option<(x25519::StaticSecret, x25519::PublicKey)>,
-    queue: Arc<EventPoll<Handler>>,
+    pub queue: Arc<EventPoll<Handler>>,
 
     listen_port: u16,
     fwmark: Option<u32>,
 
-    iface: Arc<TunSocket>,
+    pub iface: Arc<TunSocket>,
     udp4: Option<socket2::Socket>,
     udp6: Option<socket2::Socket>,
 
