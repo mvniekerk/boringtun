@@ -151,7 +151,7 @@ pub struct Device {
 
     config: DeviceConfig,
 
-    cleanup_paths: Vec<String>,
+    pub cleanup_paths: Vec<String>,
 
     mtu: AtomicUsize,
 
