@@ -410,7 +410,7 @@ impl Device {
         Ok(device)
     }
 
-    fn open_listen_socket(&mut self, mut port: u16) -> Result<(), Error> {
+    pub fn open_listen_socket(&mut self, mut port: u16) -> Result<(), Error> {
         // Binds the network facing interfaces
         // First close any existing open socket, and remove them from the event loop
         if let Some(s) = self.udp4.take() {
