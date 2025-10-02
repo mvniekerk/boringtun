@@ -462,7 +462,7 @@ impl Device {
         Ok(())
     }
 
-    fn set_key(&mut self, private_key: x25519::StaticSecret) {
+    pub fn set_key(&mut self, private_key: x25519::StaticSecret) {
         let public_key = x25519::PublicKey::from(&private_key);
         let key_pair = Some((private_key.clone(), public_key));
 
