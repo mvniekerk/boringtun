@@ -289,7 +289,7 @@ impl Device {
         self.next_index.next()
     }
 
-    fn remove_peer(&mut self, pub_key: &x25519::PublicKey) {
+    pub fn remove_peer(&mut self, pub_key: &x25519::PublicKey) {
         if let Some(peer) = self.peers.remove(pub_key) {
             // Found a peer to remove, now purge all references to it:
             {
@@ -305,7 +305,7 @@ impl Device {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn update_peer(
+    pub fn update_peer(
         &mut self,
         pub_key: x25519::PublicKey,
         remove: bool,
