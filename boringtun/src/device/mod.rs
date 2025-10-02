@@ -357,6 +357,10 @@ impl Device {
         tracing::info!("Peer added");
     }
 
+    pub fn peers(&self) -> Vec<x25519::PublicKey> {
+        self.peers.keys().cloned().collect()
+    }
+
     pub fn new(name: &str, config: DeviceConfig) -> Result<Device, Error> {
         let poll = EventPoll::<Handler>::new()?;
 
