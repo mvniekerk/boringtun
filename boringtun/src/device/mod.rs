@@ -93,7 +93,7 @@ pub enum Error {
 }
 
 // What the event loop should do after a handler returns
-pub enum Action {
+enum Action {
     Continue, // Continue the loop
     Yield,    // Yield the read lock and acquire it again
     Exit,     // Stop the loop
@@ -132,12 +132,12 @@ impl Default for DeviceConfig {
 
 pub struct Device {
     key_pair: Option<(x25519::StaticSecret, x25519::PublicKey)>,
-    pub queue: Arc<EventPoll<Handler>>,
+    queue: Arc<EventPoll<Handler>>,
 
     listen_port: u16,
     fwmark: Option<u32>,
 
-    pub iface: Arc<TunSocket>,
+    iface: Arc<TunSocket>,
     udp4: Option<socket2::Socket>,
     udp6: Option<socket2::Socket>,
 
@@ -151,7 +151,7 @@ pub struct Device {
 
     config: DeviceConfig,
 
-    pub cleanup_paths: Vec<String>,
+    cleanup_paths: Vec<String>,
 
     mtu: AtomicUsize,
 
@@ -188,6 +188,10 @@ impl DeviceHandle {
             device: interface_lock,
             threads,
         })
+    }
+
+    pub fn device(&self) -> Arc<Lock<Device>> {
+        Arc::clone(&self.device)
     }
 
     pub fn wait(&mut self) {
@@ -410,7 +414,7 @@ impl Device {
         Ok(device)
     }
 
-    pub fn open_listen_socket(&mut self, mut port: u16) -> Result<(), Error> {
+    fn open_listen_socket(&mut self, mut port: u16) -> Result<(), Error> {
         // Binds the network facing interfaces
         // First close any existing open socket, and remove them from the event loop
         if let Some(s) = self.udp4.take() {
@@ -588,7 +592,7 @@ impl Device {
             .trigger_notification(self.yield_notice.as_ref().unwrap())
     }
 
-    pub fn trigger_exit(&self) {
+    pub(crate) fn trigger_exit(&self) {
         self.queue
             .trigger_notification(self.exit_notice.as_ref().unwrap())
     }
