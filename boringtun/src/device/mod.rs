@@ -172,32 +172,29 @@ impl Debug for Device {
 }
 
 impl DeviceHandle {
-    pub fn new(name: &str, config: DeviceConfig) -> Result<DeviceHandle, Error> {
-        let runtime = Handle::current();
-        runtime.block_on(async {
-            let (stop_tx, stop_rx) = mpsc::channel(1);
-            let (iface_tx, iface_rx) = mpsc::channel(1024);
-            let wg_interface = Device::new(name, config).await?;
+    pub async fn new(name: &str, config: DeviceConfig) -> Result<DeviceHandle, Error> {
+        let (stop_tx, stop_rx) = mpsc::channel(1);
+        let (iface_tx, iface_rx) = mpsc::channel(1024);
+        let wg_interface = Device::new(name, config).await?;
 
-            let interface_lock = Arc::new(RwLock::new(wg_interface));
+        let interface_lock = Arc::new(RwLock::new(wg_interface));
 
-            let mut threads = vec![];
+        let mut threads = vec![];
 
-            threads.push({
-                let dev = Arc::clone(&interface_lock);
-                runtime.spawn(Self::iface_handler(dev, iface_tx))
-            });
+        threads.push({
+            let dev = Arc::clone(&interface_lock);
+            tokio::spawn(Self::iface_handler(dev, iface_tx))
+        });
 
-            threads.push({
-                let dev = Arc::clone(&interface_lock);
-                runtime.spawn(Self::udp_handler(dev, stop_rx, iface_rx))
-            });
+        threads.push({
+            let dev = Arc::clone(&interface_lock);
+            tokio::spawn(Self::udp_handler(dev, stop_rx, iface_rx))
+        });
 
-            Ok(DeviceHandle {
-                device: interface_lock,
-                threads,
-                stop_tx,
-            })
+        Ok(DeviceHandle {
+            device: interface_lock,
+            threads,
+            stop_tx,
         })
     }
 
