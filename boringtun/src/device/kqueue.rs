@@ -3,14 +3,15 @@
 
 use super::Error;
 use libc::*;
-use parking_lot::Mutex;
 use std::io;
 use std::ops::Deref;
 use std::os::unix::io::RawFd;
 use std::ptr::{null, null_mut};
 use std::time::Duration;
+use tokio::sync::Mutex;
 
 /// A return type for the EventPoll::wait() function
+#[derive(Debug)]
 pub enum WaitResult<'a, H> {
     /// Event triggered normally
     Ok(EventGuard<'a, H>),
@@ -21,6 +22,7 @@ pub enum WaitResult<'a, H> {
 }
 
 /// Implements a registry of pollable events
+#[derive(Debug)]
 pub struct EventPoll<H: Sized> {
     events: Mutex<Vec<Option<Box<Event<H>>>>>, // Events with a file descriptor
     custom: Mutex<Vec<Option<Box<Event<H>>>>>, // Other events (i.e. timers & notifiers)
@@ -31,6 +33,7 @@ pub struct EventPoll<H: Sized> {
 /// A type that hold a reference to a triggered Event
 /// While an EventGuard exists for a given Event, it will not be triggered by any other thread
 /// Once the EventGuard goes out of scope, the underlying Event will be re-enabled
+#[derive(Debug)]
 pub struct EventGuard<'a, H> {
     kqueue: RawFd,
     event: &'a Event<H>,
@@ -38,11 +41,12 @@ pub struct EventGuard<'a, H> {
 }
 
 /// A reference to a single event in an EventPoll
+#[derive(Debug)]
 pub struct EventRef {
     trigger: RawFd,
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 enum EventKind {
     FD,
     Notifier,
@@ -51,6 +55,7 @@ enum EventKind {
 }
 
 // A single event
+#[derive(Debug)]
 struct Event<H> {
     event: kevent, // The kqueue event description
     handler: H,    // The associated data
@@ -209,9 +214,9 @@ impl<H: Send + Sync> EventPoll<H> {
     // Register an event with this poll.
     fn register_event(&self, ev: Event<H>) -> Result<EventRef, Error> {
         let mut events = match ev.kind {
-            EventKind::FD => self.events.lock(),
-            EventKind::Timer | EventKind::Notifier => self.custom.lock(),
-            EventKind::Signal => self.signals.lock(),
+            EventKind::FD => self.events.blocking_lock(),
+            EventKind::Timer | EventKind::Notifier => self.custom.blocking_lock(),
+            EventKind::Signal => self.signals.blocking_lock(),
         };
 
         let (trigger, index) = match ev.kind {
@@ -255,7 +260,7 @@ impl<H: Send + Sync> EventPoll<H> {
     }
 
     pub fn trigger_notification(&self, notification_event: &EventRef) {
-        let events = self.custom.lock();
+        let events = self.custom.blocking_lock();
         let ev_index = -notification_event.trigger - 1; // Custom events have negative index from -1
 
         let event_ref = &(*events)[ev_index as usize];
@@ -272,7 +277,7 @@ impl<H: Send + Sync> EventPoll<H> {
     }
 
     pub fn stop_notification(&self, notification_event: &EventRef) {
-        let events = self.custom.lock();
+        let events = self.custom.blocking_lock();
         let ev_index = -notification_event.trigger - 1; // Custom events have negative index from -1
 
         let event_ref = &(*events)[ev_index as usize];
@@ -296,9 +301,9 @@ impl<H> EventPoll<H> {
     /// This function is only safe to call when the event loop is not running
     pub unsafe fn clear_event_by_fd(&self, index: RawFd) {
         let (mut events, index) = if index >= 0 {
-            (self.events.lock(), index as usize)
+            (self.events.blocking_lock(), index as usize)
         } else {
-            (self.custom.lock(), (-index - 1) as usize)
+            (self.custom.blocking_lock(), (-index - 1) as usize)
         };
 
         if let Some(mut event) = events[index].take() {

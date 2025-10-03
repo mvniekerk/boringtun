@@ -1,15 +1,13 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use parking_lot::RwLock;
+use crate::device::{AllowedIps, Error};
+use crate::noise::{Tunn, TunnResult};
 use socket2::{Domain, Protocol, Type};
-
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::str::FromStr;
 use std::time::Instant;
-
-use crate::device::{AllowedIps, Error};
-use crate::noise::{Tunn, TunnResult};
+use tokio::sync::RwLock;
 
 #[derive(Default, Debug)]
 pub struct Endpoint {
@@ -17,6 +15,7 @@ pub struct Endpoint {
     pub conn: Option<socket2::Socket>,
 }
 
+#[derive(Debug)]
 pub struct Peer {
     /// The associated tunnel struct
     pub(crate) tunnel: Tunn,
@@ -75,23 +74,27 @@ impl Peer {
         self.tunnel.update_timers_at(dst, Instant::now())
     }
 
-    pub fn endpoint(&self) -> parking_lot::RwLockReadGuard<'_, Endpoint> {
-        self.endpoint.read()
+    pub async fn endpoint(&self) -> tokio::sync::RwLockReadGuard<'_, Endpoint> {
+        self.endpoint.read().await
     }
 
-    pub(crate) fn endpoint_mut(&self) -> parking_lot::RwLockWriteGuard<'_, Endpoint> {
-        self.endpoint.write()
+    pub(crate) async fn endpoint_mut(&self) -> tokio::sync::RwLockWriteGuard<'_, Endpoint> {
+        self.endpoint.write().await
     }
 
-    pub fn shutdown_endpoint(&self) {
-        if let Some(conn) = self.endpoint.write().conn.take() {
+    pub fn unstage_roaming_addr(&mut self) {
+        // TODO: implement this
+    }
+
+    pub async fn shutdown_endpoint(&self) {
+        if let Some(conn) = self.endpoint.write().await.conn.take() {
             tracing::info!("Disconnecting from endpoint");
             conn.shutdown(Shutdown::Both).unwrap();
         }
     }
 
-    pub fn set_endpoint(&self, addr: SocketAddr) {
-        let mut endpoint = self.endpoint.write();
+    pub async fn set_endpoint(&self, addr: SocketAddr) {
+        let mut endpoint = self.endpoint.write().await;
         if endpoint.addr != Some(addr) {
             // We only need to update the endpoint if it differs from the current one
             if let Some(conn) = endpoint.conn.take() {
@@ -106,12 +109,12 @@ impl Peer {
         not(any(target_os = "android", target_os = "fuchsia", target_os = "linux")),
         allow(unused_variables)
     )]
-    pub fn connect_endpoint(
+    pub async fn connect_endpoint(
         &self,
         port: u16,
         fwmark: Option<u32>,
     ) -> Result<socket2::Socket, Error> {
-        let mut endpoint = self.endpoint.write();
+        let mut endpoint = self.endpoint.write().await;
 
         if endpoint.conn.is_some() {
             return Err(Error::Connect("Connected".to_owned()));

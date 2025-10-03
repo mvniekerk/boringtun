@@ -3,14 +3,15 @@
 
 use super::Error;
 use libc::*;
-use parking_lot::Mutex;
 use std::io;
 use std::ops::Deref;
 use std::os::unix::io::RawFd;
 use std::ptr::null_mut;
 use std::time::Duration;
+use tokio::sync::Mutex;
 
 /// A return type for the EventPoll::wait() function
+#[derive(Debug)]
 pub enum WaitResult<'a, H> {
     /// Event triggered normally
     Ok(EventGuard<'a, H>),
@@ -21,6 +22,7 @@ pub enum WaitResult<'a, H> {
 }
 
 /// Implements a registry of pollable events
+#[derive(Debug)]
 pub struct EventPoll<H: Sized> {
     events: Mutex<Vec<Option<Box<Event<H>>>>>,
     epoll: RawFd, // The OS epoll
@@ -29,6 +31,7 @@ pub struct EventPoll<H: Sized> {
 /// A type that hold a reference to a triggered Event
 /// While an EventGuard exists for a given Event, it will not be triggered by any other thread
 /// Once the EventGuard goes out of scope, the underlying Event will be re-enabled
+#[derive(Debug)]
 pub struct EventGuard<'a, H> {
     epoll: RawFd,
     event: &'a mut Event<H>,
@@ -36,10 +39,12 @@ pub struct EventGuard<'a, H> {
 }
 
 /// A reference to a single event in an EventPoll
+#[derive(Debug)]
 pub struct EventRef {
     trigger: RawFd,
 }
 
+#[derive(Debug)]
 struct Event<H> {
     event: epoll_event, // The epoll event description
     fd: RawFd,          // The associated fd
@@ -167,7 +172,7 @@ impl<H: Sync + Send> EventPoll<H> {
     /// called. Both methods should only be called with the producing EventPoll.
     pub fn new_notifier(&self, handler: H) -> Result<EventRef, Error> {
         // The notifier on Linux uses the eventfd for notifications.
-        // The way it works is when a non zero value is written into the eventfd it will trigger
+        // The way it works is when a non-zero value is written into the eventfd it will trigger
         // the EPOLLIN event. Since we don't enable ONESHOT it will keep triggering until
         // canceled.
         // When we want to stop the event, we read something once from the file descriptor.
@@ -269,7 +274,7 @@ impl<H: Sync + Send> EventPoll<H> {
 
     // Insert an event into the events vector
     fn insert_at(&self, index: usize, data: Box<Event<H>>) {
-        let mut events = self.events.lock();
+        let mut events = self.events.blocking_lock();
         while events.len() <= index {
             // Resize the vector to be able to fit the new index
             // We trust the OS to allocate file descriptors in a sane order
@@ -288,7 +293,7 @@ impl<H: Sync + Send> EventPoll<H> {
 
     /// Trigger a notification
     pub fn trigger_notification(&self, notification_event: &EventRef) {
-        let events = self.events.lock();
+        let events = self.events.blocking_lock();
 
         let event_ref = &(*events)[notification_event.trigger as usize];
         let event_data = event_ref.as_ref().expect("Expected an event");
@@ -309,7 +314,7 @@ impl<H: Sync + Send> EventPoll<H> {
 
     /// Stop a notification
     pub fn stop_notification(&self, notification_event: &EventRef) {
-        let events = self.events.lock();
+        let events = self.events.blocking_lock();
 
         let event_ref = &(*events)[notification_event.trigger as usize];
         let event_data = event_ref.as_ref().expect("Expected an event");
@@ -338,7 +343,7 @@ impl<H> EventPoll<H> {
     /// This function is only safe to call when the event loop is not running,
     /// otherwise the memory of the handler may get freed while in use.
     pub unsafe fn clear_event_by_fd(&self, index: RawFd) {
-        let mut events = self.events.lock();
+        let mut events = self.events.blocking_lock();
         assert!(index >= 0);
         if events[index as usize].take().is_some() {
             epoll_ctl(self.epoll, EPOLL_CTL_DEL, index, null_mut());

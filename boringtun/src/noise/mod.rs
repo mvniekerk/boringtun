@@ -62,6 +62,7 @@ impl<'a> From<WireGuardError> for TunnResult<'a> {
 }
 
 /// Tunnel represents a point-to-point WireGuard connection
+#[derive(Debug)]
 pub struct Tunn {
     /// The handshake currently in progress
     handshake: handshake::Handshake,

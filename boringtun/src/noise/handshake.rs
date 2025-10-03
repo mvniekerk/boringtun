@@ -15,6 +15,7 @@ use constant_time_eq::constant_time_eq;
 use rand::rngs::OsRng;
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
 use std::convert::TryInto;
+use std::fmt::Debug;
 use std::time::{Duration, Instant, SystemTime};
 
 pub(crate) const LABEL_MAC1: &[u8; 8] = b"mac1----";
@@ -292,6 +293,7 @@ enum HandshakeState {
     Expired,
 }
 
+#[derive(Debug)]
 pub struct Handshake {
     params: NoiseParams,
     /// Index of the next session
@@ -313,6 +315,16 @@ struct Cookies {
     last_mac1: Option<[u8; 16]>,
     index: Index,
     write_cookie: Option<WriteCookie>,
+}
+
+impl Debug for Cookies {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Cookies")
+            .field("last_mac1", &self.last_mac1)
+            .field("index", &self.index)
+            .field("write_cookie", &self.write_cookie.map(|wc| wc.value)) // Redact Instant for Debug
+            .finish()
+    }
 }
 
 #[derive(Clone, Copy)]

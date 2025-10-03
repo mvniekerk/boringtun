@@ -31,6 +31,7 @@ type Cookie = [u8; COOKIE_SIZE];
 /// resources is the main goal of any DoS prevention mechanism.
 /// In order to avoid locking and calls to rand we derive pseudo random values using the AEAD and
 /// some counters.
+#[derive(Debug)]
 pub struct RateLimiter {
     /// The key we use to derive the nonce
     nonce_key: [u8; 32],

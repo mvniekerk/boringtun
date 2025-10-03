@@ -7,6 +7,7 @@ use ip_network::IpNetwork;
 use ip_network_table::IpNetworkTable;
 
 use std::collections::VecDeque;
+use std::fmt::Debug;
 use std::iter::FromIterator;
 use std::net::IpAddr;
 
@@ -14,6 +15,51 @@ use std::net::IpAddr;
 #[derive(Default)]
 pub struct AllowedIps<D> {
     ips: IpNetworkTable<D>,
+}
+
+impl<D: Debug> Debug for AllowedIps<D> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut dbm = f.debug_map();
+        for (ip, d) in self.ips.iter() {
+            match ip {
+                IpNetwork::V4(ip) => {
+                    let addr = ip.network_address();
+                    let addr = addr.octets();
+                    let ip = format!(
+                        "{}.{}.{}.{}/{}",
+                        addr[0],
+                        addr[1],
+                        addr[2],
+                        addr[3],
+                        ip.netmask()
+                    );
+                    dbm.key(&ip);
+                    dbm.value(d);
+                }
+                IpNetwork::V6(ip) => {
+                    let addr = ip.network_address();
+                    let addr = addr.segments();
+                    let ip = format!(
+                        "{:x}:{:x}:{:x}:{:x}:{:x}:{:x}:{:x}:{:x}/{}",
+                        addr[0],
+                        addr[1],
+                        addr[2],
+                        addr[3],
+                        addr[4],
+                        addr[5],
+                        addr[6],
+                        addr[7],
+                        ip.netmask()
+                    );
+                    dbm.key(&ip);
+                    dbm.value(d);
+                }
+            }
+        }
+        let dbm = dbm.finish();
+
+        f.debug_struct("AllowedIps").field("ips", &dbm).finish()
+    }
 }
 
 impl<'a, D> FromIterator<(&'a AllowedIP, D)> for AllowedIps<D> {
