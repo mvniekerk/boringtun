@@ -373,14 +373,16 @@ impl Drop for DeviceHandle {
     fn drop(&mut self) {
         let device = self.device.clone();
         let stop_tx = self.stop_tx.clone();
-        Handle::current().block_on(async move {
-            stop_tx.send(()).await.unwrap();
-            let mut handle = DeviceHandle {
-                device,
-                threads: vec![],
-                stop_tx: stop_tx.clone(),
-            };
-            handle.clean().await;
+        std::thread::spawn(move || {
+            Handle::current().block_on(async move {
+                stop_tx.send(()).await.unwrap();
+                let mut handle = DeviceHandle {
+                    device,
+                    threads: vec![],
+                    stop_tx: stop_tx.clone(),
+                };
+                handle.clean().await;
+            });
         });
     }
 }
