@@ -25,7 +25,8 @@ fn check_tun_name(_v: String) -> Result<(), String> {
     }
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let matches = Command::new("boringtun")
         .version(env!("CARGO_PKG_VERSION"))
         .author("Vlad Krasnov <vlad@cloudflare.com>")
@@ -153,7 +154,7 @@ fn main() {
         use_multi_queue: !matches.is_present("disable-multi-queue"),
     };
 
-    let mut device_handle: DeviceHandle = match DeviceHandle::new(tun_name, config) {
+    let mut device_handle: DeviceHandle = match DeviceHandle::new(tun_name, config).await {
         Ok(d) => d,
         Err(error) => {
             // Notify parent that tunnel initialization failed
@@ -177,5 +178,5 @@ fn main() {
 
     tracing::info!("BoringTun started successfully");
 
-    device_handle.wait();
+    device_handle.wait().await;
 }

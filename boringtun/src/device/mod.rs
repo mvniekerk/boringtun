@@ -28,11 +28,11 @@ use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::io::{self, Write as _};
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
+#[cfg(unix)]
+use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use std::time::Instant;
-#[cfg(unix)]
-use std::os::unix::io::{AsRawFd, FromRawFd};
 
 use crate::noise::handshake::parse_handshake_anon;
 use crate::noise::rate_limiter::RateLimiter;
@@ -43,9 +43,10 @@ use peer::{AllowedIP, Peer};
 use rand::{rngs::OsRng, RngCore};
 use socket2::{Domain, Protocol, Type};
 use tokio::net::UdpSocket;
-use tokio::runtime::{Handle, Runtime};
+use tokio::runtime::Handle;
 use tokio::sync::{mpsc, RwLock};
 use tokio::task::JoinHandle;
+use tracing::error;
 use tun::TunSocket;
 
 const HANDSHAKE_RATE_LIMIT: u64 = 100; // The number of handshakes per second we can tolerate before using cookies
@@ -204,7 +205,9 @@ impl DeviceHandle {
 
     pub async fn wait(&mut self) {
         for thread in self.threads.drain(..) {
-            thread.await.unwrap();
+            if let Err(e) = thread.await {
+                error!(?e, "Join error on .wait");
+            }
         }
     }
 
@@ -229,8 +232,21 @@ impl DeviceHandle {
             (d.udp4.clone(), d.udp6.clone())
         };
 
-        let udp4 = udp4.unwrap();
-        let udp6 = udp6.unwrap();
+        let (udp4, udp6) = match (udp4, udp6) {
+            (Some(udp4), Some(udp6)) => (udp4, udp6),
+            (Some(_), None) => {
+                error!("Udp6 not defined");
+                return;
+            }
+            (None, Some(_)) => {
+                error!("Udp4 not defined");
+                return;
+            }
+            (None, None) => {
+                error!("Both udp4 and udp6 not defined");
+                return;
+            }
+        };
 
         loop {
             tokio::select! {
@@ -253,13 +269,20 @@ impl DeviceHandle {
         let iface = device.read().await.iface.clone();
         loop {
             if let Ok(r) = iface.read(&mut buf) {
-                iface_tx.send(r.to_vec()).await.unwrap();
+                if let Err(e) = iface_tx.send(r.to_vec()).await {
+                    error!(?e, "Error sending iface packet")
+                }
             }
         }
     }
 
     async fn handle_iface_packet(device: Arc<RwLock<Device>>, src: &[u8], dst_buf: &mut [u8]) {
         let d = device.read().await;
+        if d.udp4.is_none() || d.udp6.is_none() {
+            error!(?d, "No UDP4 or UDP6 packet, bailing on handle iface packet");
+            return;
+        }
+
         let dst_addr = match Tunn::dst_address(src) {
             Some(addr) => addr,
             None => return,
@@ -302,6 +325,10 @@ impl DeviceHandle {
         addr: SocketAddr,
     ) {
         let d = device.read().await;
+        if d.rate_limiter.is_none() {
+            error!("No rate limiter, bailing on handle_udp_packet");
+            return;
+        }
         let (private_key, public_key) = d.key_pair.as_ref().expect("Key not set");
         let rate_limiter = d.rate_limiter.as_ref().unwrap();
 
@@ -372,7 +399,9 @@ impl Drop for DeviceHandle {
         let stop_tx = self.stop_tx.clone();
         std::thread::spawn(move || {
             Handle::current().block_on(async move {
-                stop_tx.send(()).await.unwrap();
+                if let Err(e) = stop_tx.send(()).await {
+                    error!(?e, "Error sending stop signal");
+                }
                 let mut handle = DeviceHandle {
                     device,
                     threads: vec![],
@@ -511,28 +540,22 @@ impl Device {
     }
 
     async fn open_listen_socket(&mut self, mut port: u16) -> Result<(), Error> {
-        let udp_sock4 =
-            socket2::Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP)).unwrap();
-        udp_sock4.set_reuse_address(true).unwrap();
-        udp_sock4
-            .bind(&SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port).into())
-            .unwrap();
-        udp_sock4.set_nonblocking(true).unwrap();
+        let udp_sock4 = socket2::Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
+        udp_sock4.set_reuse_address(true)?;
+        udp_sock4.bind(&SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port).into())?;
+        udp_sock4.set_nonblocking(true)?;
 
         if port == 0 {
-            port = udp_sock4.local_addr().unwrap().as_socket().unwrap().port();
+            port = udp_sock4.local_addr()?.as_socket().unwrap().port();
         }
 
-        let udp_sock6 =
-            socket2::Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP)).unwrap();
-        udp_sock6.set_reuse_address(true).unwrap();
-        udp_sock6
-            .bind(&SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, port, 0, 0).into())
-            .unwrap();
-        udp_sock6.set_nonblocking(true).unwrap();
+        let udp_sock6 = socket2::Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP))?;
+        udp_sock6.set_reuse_address(true)?;
+        udp_sock6.bind(&SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, port, 0, 0).into())?;
+        udp_sock6.set_nonblocking(true)?;
 
-        self.udp4 = Some(Arc::new(UdpSocket::from_std(udp_sock4.into()).unwrap()));
-        self.udp6 = Some(Arc::new(UdpSocket::from_std(udp_sock6.into()).unwrap()));
+        self.udp4 = Some(Arc::new(UdpSocket::from_std(udp_sock4.into())?));
+        self.udp6 = Some(Arc::new(UdpSocket::from_std(udp_sock6.into())?));
 
         self.listen_port = port;
 
