@@ -176,10 +176,7 @@ impl DeviceHandle {
     pub async fn new(name: &str, config: DeviceConfig) -> Result<DeviceHandle, Error> {
         let (stop_tx, stop_rx) = mpsc::channel(1);
         let (iface_tx, iface_rx) = mpsc::channel(1024);
-        let wg_interface = Device::new(name, config).await?;
-
-        let interface_lock = Arc::new(RwLock::new(wg_interface));
-
+        let interface_lock = Device::new(name, config).await?;
         let mut threads = vec![];
 
         threads.push({
@@ -211,8 +208,8 @@ impl DeviceHandle {
         }
     }
 
-    pub async fn clean(&mut self) {
-        for path in &self.device.read().await.cleanup_paths {
+    pub(crate) fn clean(cleanup_paths: &Vec<String>) {
+        for path in cleanup_paths {
             // attempt to remove any file we created in the work dir
             let _ = std::fs::remove_file(path);
         }
@@ -397,18 +394,12 @@ impl Drop for DeviceHandle {
     fn drop(&mut self) {
         let device = self.device.clone();
         let stop_tx = self.stop_tx.clone();
-        std::thread::spawn(move || {
-            Handle::current().block_on(async move {
-                if let Err(e) = stop_tx.send(()).await {
-                    error!(?e, "Error sending stop signal");
-                }
-                let mut handle = DeviceHandle {
-                    device,
-                    threads: vec![],
-                    stop_tx: stop_tx.clone(),
-                };
-                handle.clean().await;
-            });
+        tokio::spawn(async move {
+            if let Err(e) = stop_tx.send(()).await {
+                error!(?e, "Error sending stop signal");
+            }
+            let device = device.read().await;
+            Self::clean(&device.cleanup_paths);
         });
     }
 }
@@ -488,7 +479,7 @@ impl Device {
         self.peers.keys().cloned().collect()
     }
 
-    pub async fn new(name: &str, config: DeviceConfig) -> Result<Device, Error> {
+    pub async fn new(name: &str, config: DeviceConfig) -> Result<Arc<RwLock<Device>>, Error> {
         let iface = Arc::new(TunSocket::new(name)?.set_non_blocking()?);
         let mtu = iface.mtu()?;
 
@@ -536,7 +527,7 @@ impl Device {
             }
         }
 
-        Ok(Arc::try_unwrap(device_arc).unwrap().into_inner())
+        Ok(device_arc)
     }
 
     async fn open_listen_socket(&mut self, mut port: u16) -> Result<(), Error> {
