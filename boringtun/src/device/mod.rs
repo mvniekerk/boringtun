@@ -275,13 +275,22 @@ impl DeviceHandle {
     async fn iface_handler(device: Arc<RwLock<Device>>, iface_tx: mpsc::Sender<Vec<u8>>) {
         debug!("Iface Device handler start");
         let mut buf = [0u8; MAX_UDP_SIZE];
-        let iface = device.read().await.iface.clone();
+        let iface = {
+            let r = device.read().await;
+            r.iface.clone()
+        };
         loop {
             debug!("Iface handle before read");
-            if let Ok(r) = iface.read(&mut buf) {
-                debug!("Read from iface");
-                if let Err(e) = iface_tx.send(r.to_vec()).await {
-                    error!(?e, "Error sending iface packet")
+            match iface.read(&mut buf) {
+                Ok(r) => {
+                    debug!("Read from iface");
+                    if let Err(e) = iface_tx.send(r.to_vec()).await {
+                        error!(?e, "Error sending iface packet")
+                    }
+                }
+                Err(e) => {
+                    error!(?e, "Error on iface read");
+                    break;
                 }
             }
         }
