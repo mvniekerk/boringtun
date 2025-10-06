@@ -280,7 +280,7 @@ impl DeviceHandle {
             r.iface.clone()
         };
         loop {
-            debug!("Iface handle before read");
+            // debug!("Iface handle before read");
             match iface.read(&mut buf) {
                 Ok(r) => {
                     debug!("Read from iface");
