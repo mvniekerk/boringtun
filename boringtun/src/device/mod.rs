@@ -32,7 +32,7 @@ use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::noise::handshake::parse_handshake_anon;
 use crate::noise::rate_limiter::RateLimiter;
@@ -290,7 +290,7 @@ impl DeviceHandle {
                 }
                 Err(e) => {
                     error!(?e, "Error on iface read");
-                    break;
+                    tokio::time::sleep(Duration::from_millis(300)).await;
                 }
             }
         }
