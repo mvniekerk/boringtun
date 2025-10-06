@@ -45,7 +45,7 @@ use socket2::{Domain, Protocol, Type};
 use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, RwLock};
 use tokio::task::JoinHandle;
-use tracing::error;
+use tracing::{debug, error};
 use tun::TunSocket;
 
 const HANDSHAKE_RATE_LIMIT: u64 = 100; // The number of handshakes per second we can tolerate before using cookies
@@ -247,6 +247,7 @@ impl DeviceHandle {
         };
 
         loop {
+            debug!("Loop on iface/udp rx");
             tokio::select! {
                 _ = stop_rx.recv() => return,
                 Some(packet) = iface_rx.recv() => {
@@ -267,6 +268,7 @@ impl DeviceHandle {
         let iface = device.read().await.iface.clone();
         loop {
             if let Ok(r) = iface.read(&mut buf) {
+                debug!("Read from iface");
                 if let Err(e) = iface_tx.send(r.to_vec()).await {
                     error!(?e, "Error sending iface packet")
                 }
@@ -275,6 +277,7 @@ impl DeviceHandle {
     }
 
     async fn handle_iface_packet(device: Arc<RwLock<Device>>, src: &[u8], dst_buf: &mut [u8]) {
+        debug!("Handle iface packet");
         let d = device.read().await;
         if d.udp4.is_none() || d.udp6.is_none() {
             error!(?d, "No UDP4 or UDP6 packet, bailing on handle iface packet");
@@ -322,6 +325,7 @@ impl DeviceHandle {
         dst_buf: &mut [u8],
         addr: SocketAddr,
     ) {
+        debug!("Handle UDP packet");
         let d = device.read().await;
         if d.rate_limiter.is_none() {
             error!("No rate limiter, bailing on handle_udp_packet");
