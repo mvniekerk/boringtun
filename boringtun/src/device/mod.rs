@@ -221,6 +221,8 @@ impl DeviceHandle {
         mut stop_rx: mpsc::Receiver<()>,
         mut iface_rx: mpsc::Receiver<Vec<u8>>,
     ) {
+        eprintln!("Udp handler start");
+        debug!("Udp handler start");
         let mut src_buf4 = [0u8; MAX_UDP_SIZE];
         let mut src_buf6 = [0u8; MAX_UDP_SIZE];
         let mut dst_buf = [0u8; MAX_UDP_SIZE];
@@ -247,16 +249,23 @@ impl DeviceHandle {
         };
 
         loop {
+            eprintln!("Loop on iface/udp rx");
             debug!("Loop on iface/udp rx");
             tokio::select! {
                 _ = stop_rx.recv() => return,
                 Some(packet) = iface_rx.recv() => {
+                    eprintln!("Handle iface package start");
+                    debug!("Handle iface package start");
                     Self::handle_iface_packet(device.clone(), &packet, &mut dst_buf).await;
                 }
                 Ok((size, addr)) = udp4.recv_from(&mut src_buf4) => {
+                    eprintln!("Handle udp package start");
+                    debug!("Handle udp package start");
                     Self::handle_udp_packet(device.clone(), &udp4, &src_buf4[..size], &mut dst_buf, addr).await;
                 }
                 Ok((size, addr)) = udp6.recv_from(&mut src_buf6) => {
+                    eprintln!("Handle udp package start");
+                    debug!("Handle udp package start");
                     Self::handle_udp_packet(device.clone(), &udp6, &src_buf6[..size], &mut dst_buf, addr).await;
                 }
             }
@@ -264,9 +273,11 @@ impl DeviceHandle {
     }
 
     async fn iface_handler(device: Arc<RwLock<Device>>, iface_tx: mpsc::Sender<Vec<u8>>) {
+        debug!("Iface Device handler start");
         let mut buf = [0u8; MAX_UDP_SIZE];
         let iface = device.read().await.iface.clone();
         loop {
+            debug!("Iface handle before read");
             if let Ok(r) = iface.read(&mut buf) {
                 debug!("Read from iface");
                 if let Err(e) = iface_tx.send(r.to_vec()).await {
