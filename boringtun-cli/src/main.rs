@@ -36,6 +36,13 @@ async fn main() {
                 .takes_value(true)
                 .validator(|tunname| check_tun_name(tunname.to_string()))
                 .help("The name of the created interface"),
+            Arg::new("PORT")
+                .required(false)
+                .takes_value(true)
+                .validator(|p| p.parse::<u16>())
+                .short('p')
+                .help("Listen port")
+                .default_value("51820"),
             Arg::new("foreground")
                 .long("foreground")
                 .short('f')
@@ -96,6 +103,7 @@ async fn main() {
     }
     let n_threads: usize = matches.value_of_t("threads").unwrap_or_else(|e| e.exit());
     let log_level: Level = matches.value_of_t("verbosity").unwrap_or_else(|e| e.exit());
+    let listen_port = matches.value_of_t("PORT").ok();
 
     // Create a socketpair to communicate between forked processes
     let (sock1, sock2) = UnixDatagram::pair().unwrap();
@@ -152,6 +160,7 @@ async fn main() {
         use_connected_socket: !matches.is_present("disable-connected-udp"),
         #[cfg(target_os = "linux")]
         use_multi_queue: !matches.is_present("disable-multi-queue"),
+        listen_port
     };
 
     let mut device_handle: DeviceHandle = match DeviceHandle::new(tun_name, config).await {

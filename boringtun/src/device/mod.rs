@@ -43,7 +43,6 @@ use peer::{AllowedIP, Peer};
 use rand::{rngs::OsRng, RngCore};
 use socket2::{Domain, Protocol, Type};
 use tokio::net::UdpSocket;
-use tokio::runtime::Handle;
 use tokio::sync::{mpsc, RwLock};
 use tokio::task::JoinHandle;
 use tracing::error;
@@ -103,6 +102,7 @@ pub struct DeviceConfig {
     pub use_multi_queue: bool,
     #[cfg(target_os = "linux")]
     pub uapi_fd: i32,
+    pub listen_port: Option<u16>
 }
 
 impl Default for DeviceConfig {
@@ -114,6 +114,7 @@ impl Default for DeviceConfig {
             use_multi_queue: true,
             #[cfg(target_os = "linux")]
             uapi_fd: -1,
+            listen_port: None
         }
     }
 }
@@ -487,13 +488,14 @@ impl Device {
         let uapi_fd = -1;
         #[cfg(target_os = "linux")]
         let uapi_fd = config.uapi_fd;
+        let listen_port = config.listen_port.unwrap_or(0);
 
         let device_arc = Arc::new(RwLock::new(Device {
             iface,
             config,
             fwmark: Default::default(),
             key_pair: Default::default(),
-            listen_port: Default::default(),
+            listen_port,
             next_index: Default::default(),
             peers: Default::default(),
             peers_by_idx: Default::default(),
@@ -514,7 +516,7 @@ impl Device {
             } else {
                 d.register_api_handler(device_arc.clone())?;
             }
-            d.open_listen_socket(0).await?;
+            d.open_listen_socket(listen_port).await?;
 
             #[cfg(target_os = "macos")]
             {
